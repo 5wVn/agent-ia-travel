@@ -4,112 +4,118 @@
 <h1>Dates suivies</h1>
 {% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
-<div class="card" data-reveal>
-  <div class="head"><h2>Ajouter une date</h2></div>
-  <form method="post" action="/dates/add" class="formgrid">
-    <div class="field">
-      <label>Aller</label>
-      <input type="date" name="depart_date" required>
+<div class="dates-grid">
+  <div class="panel">
+    {% if dates %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th>
+            <th class="num">Meilleur prix</th><th>Snipe</th><th class="num"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dates %}
+          {% set d = item.row %}
+          <tr>
+            <td class="route-cell">
+              {{ d.depart_date|fr_date }}
+              {% if not d.active %}<span class="badge off">inactive</span>{% endif %}
+            </td>
+            <td>{{ d.return_date|fr_date if d.return_date else "—" }}</td>
+            <td class="sub">
+              aller {{ d.depart_time_from|fr_timerange(d.depart_time_to) }} ·
+              retour {{ d.return_time_from|fr_timerange(d.return_time_to) }}
+            </td>
+            <td>{% if d.route_origin %}{{ d.route_origin }}→{{ d.route_destination }}{% else %}toutes{% endif %}</td>
+            <td class="num">
+              {% if item.best is not none %}
+                <span class="price">{{ item.best|eur }}</span>{% if item.best_stops %} <span class="sub">· {{ item.best_stops }}</span>{% endif %}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
+                <span class="badge armed">{{ "armé" if d.snipe_state == "armed" else "déclenché" }} ≤ {{ d.snipe_price_eur|eur }}</span>
+                <form method="post" action="/dates/{{ d.id }}/disarm" class="inline">
+                  <button class="ghost" type="submit">Désarmer</button>
+                </form>
+              {% else %}
+                <form method="post" action="/dates/{{ d.id }}/arm" class="inline">
+                  <input type="number" name="threshold" min="1" step="1" placeholder="€" style="width:5rem" required>
+                  <button type="submit">Armer</button>
+                </form>
+              {% endif %}
+            </td>
+            <td class="num">
+              {% if d.active %}
+              <form method="post" action="/dates/{{ d.id }}/deactivate" class="inline"
+                    onsubmit="return confirm('Désactiver cette date suivie ?');">
+                <button class="ghost" type="submit">Désactiver</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-    <div class="field">
-      <label>Retour</label>
-      <input type="date" name="return_date">
+    {% else %}
+    <div class="empty">
+      <div class="title">Aucune date suivie</div>
+      <p>Ajoutez une date de voyage pour suivre son prix et armer un snipe.</p>
     </div>
-    <div class="field">
-      <label>Départ de</label>
-      <select name="depart_time_from">
-        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="field">
-      <label>Départ à</label>
-      <select name="depart_time_to">
-        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="field">
-      <label>Retour de</label>
-      <select name="return_time_from">
-        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="field">
-      <label>Retour à</label>
-      <select name="return_time_to">
-        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="field wide">
-      <label>Route</label>
-      <select name="route_id">
-        <option value="">Toutes les routes actives</option>
-        {% for r in routes %}<option value="{{ r.id }}">{{ r.origin }}→{{ r.destination }}</option>{% endfor %}
-      </select>
-    </div>
-    <button type="submit">Ajouter</button>
-  </form>
-</div>
-
-{% if dates %}
-<div class="card" data-reveal>
-  <table class="stacked">
-    <thead>
-      <tr><th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th><th>Meilleur prix</th><th>Snipe</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for item in dates %}
-      {% set d = item.row %}
-      <tr>
-        <td data-label="Aller">
-          {{ d.depart_date|fr_date }}
-          {% if not d.active %}<span class="badge off">inactive</span>{% endif %}
-        </td>
-        <td data-label="Retour">{{ d.return_date|fr_date if d.return_date else "—" }}</td>
-        <td data-label="Fourchettes" class="muted">
-          aller {{ d.depart_time_from|fr_timerange(d.depart_time_to) }} ·
-          retour {{ d.return_time_from|fr_timerange(d.return_time_to) }}
-        </td>
-        <td data-label="Route">{% if d.route_origin %}{{ d.route_origin }}→{{ d.route_destination }}{% else %}toutes{% endif %}</td>
-        <td data-label="Meilleur prix">
-          {% if item.best is not none %}
-            <strong>{{ item.best|eur }}</strong>{% if item.best_stops %} <span class="muted">· {{ item.best_stops }}</span>{% endif %}
-          {% else %}
-            <span class="muted">—</span>
-          {% endif %}
-        </td>
-        <td data-label="Snipe">
-          {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
-            <span class="badge armed">{{ "armé" if d.snipe_state == "armed" else "déclenché" }} ≤ {{ d.snipe_price_eur|eur }}</span>
-            <form method="post" action="/dates/{{ d.id }}/disarm" class="inline">
-              <button class="ghost" type="submit">Désarmer</button>
-            </form>
-          {% else %}
-            <form method="post" action="/dates/{{ d.id }}/arm" class="inline">
-              <input type="number" name="threshold" min="1" step="1" placeholder="€" style="width:5.5rem" required>
-              <button type="submit">Armer</button>
-            </form>
-          {% endif %}
-        </td>
-        <td class="actions">
-          {% if d.active %}
-          <form method="post" action="/dates/{{ d.id }}/deactivate" class="inline"
-                onsubmit="return confirm('Désactiver cette date suivie ?');">
-            <button class="ghost" type="submit">Désactiver</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% else %}
-<div class="card" data-reveal>
-  <div class="empty">
-    <span class="emoji">📅</span>
-    <div class="title">Aucune date suivie</div>
-    <p>Ajoute une date de voyage ci-dessus pour suivre son prix et armer un snipe.</p>
+    {% endif %}
   </div>
+
+  <aside class="panel add-panel">
+    <div class="panel-head"><h2>Ajouter une date</h2></div>
+    <div class="panel-body">
+      <form method="post" action="/dates/add">
+        <div class="field">
+          <label>Aller</label>
+          <input type="date" name="depart_date" required>
+        </div>
+        <div class="field">
+          <label>Retour</label>
+          <input type="date" name="return_date">
+        </div>
+        <div class="field">
+          <label>Départ de</label>
+          <select name="depart_time_from">
+            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Départ à</label>
+          <select name="depart_time_to">
+            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Retour de</label>
+          <select name="return_time_from">
+            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Retour à</label>
+          <select name="return_time_to">
+            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Route</label>
+          <select name="route_id">
+            <option value="">Toutes les routes actives</option>
+            {% for r in routes %}<option value="{{ r.id }}">{{ r.origin }}→{{ r.destination }}</option>{% endfor %}
+          </select>
+        </div>
+        <button type="submit">Ajouter</button>
+      </form>
+    </div>
+  </aside>
 </div>
-{% endif %}
 {% endblock %}

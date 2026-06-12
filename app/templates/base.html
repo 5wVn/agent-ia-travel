@@ -3,42 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0a0e14" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1E1711" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F4F1EA" media="(prefers-color-scheme: light)">
   <title>{% block title %}Dashboard{% endblock %} · Agent Travel</title>
-  <link rel="preload" href="/static/fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/manrope.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/dashboard.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/chart.min.js" defer></script>
   <script src="/static/charts.js" defer></script>
-  <script src="/static/reveal.js" defer></script>
 </head>
 <body>
   {% block chrome %}
-  <header class="topbar">
-    <span class="brand"><span class="plane">✈️</span><span class="name">Agent <b>Travel</b></span></span>
-    <nav class="tabs">
-      <a href="/" class="{{ 'active' if active == 'overview' else '' }}">Vue d'ensemble</a>
-      <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}">Destinations</a>
-      <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}">Dates</a>
-      <a href="/status" class="{{ 'active' if active == 'status' else '' }}">Statut</a>
-    </nav>
-    <span class="spacer"></span>
-    <a href="/logout" class="logout">Déconnexion</a>
-  </header>
-  <div class="warn-banner">⚠️ Accès LAN uniquement — pour l'accès distant, passez par le VPN/Tailscale du NAS (pas de redirection de port internet).</div>
-  {% endblock %}
-  <main>
-    {% block content %}{% endblock %}
-  </main>
-  {% block bottomnav %}
-  <nav class="bottomnav">
-    <a href="/" class="{{ 'active' if active == 'overview' else '' }}"><span class="ico">📊</span>Vue</a>
-    <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}"><span class="ico">🗺️</span>Destinations</a>
-    <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}"><span class="ico">📅</span>Dates</a>
-    <a href="/status" class="{{ 'active' if active == 'status' else '' }}"><span class="ico">⚙️</span>Statut</a>
-  </nav>
+  <div class="shell">
+    <aside class="sidebar">
+      <span class="brand">AGENT <span>TRAVEL</span></span>
+      <nav>
+        <a href="/" class="{{ 'active' if active == 'overview' else '' }}">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg>
+          Vue d'ensemble
+        </a>
+        <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 5l4-2 4 2 4-2v8l-4 2-4-2-4 2V5z"/><path d="M6 3v8M10 5v8"/></svg>
+          Destinations
+        </a>
+        <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg>
+          Dates
+        </a>
+        <a href="/status" class="{{ 'active' if active == 'status' else '' }}">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M13 3l-1.4 1.4M4.4 11.6L3 13"/></svg>
+          Statut
+        </a>
+      </nav>
+      <div class="foot">
+        <a href="/logout">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><path d="M10 11l3-3-3-3M13 8H6"/></svg>
+          Déconnexion
+        </a>
+      </div>
+    </aside>
+    <div class="content">
+      <div class="warn-banner">Accès LAN uniquement — pour l'accès distant, passez par le VPN/Tailscale du NAS (pas de redirection de port internet).</div>
+      <main>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
   {% endblock %}
 </body>
 </html>

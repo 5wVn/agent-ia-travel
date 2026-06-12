@@ -191,6 +191,12 @@ def _overview_rows(config: Config, db: Database) -> list[dict]:
         )
         median = db.route_median(origin, destination, win)
         p25 = db.route_percentile(origin, destination, 25.0, win)
+        delta = None
+        delta_pct = None
+        if best is not None and median is not None:
+            delta = best - median
+            if median:
+                delta_pct = (best - median) / median * 100.0
         rows.append(
             {
                 "id": r["id"],
@@ -201,9 +207,12 @@ def _overview_rows(config: Config, db: Database) -> list[dict]:
                 "best_stops": best_stops,
                 "median": median,
                 "p25": p25,
+                "delta": delta,
+                "delta_pct": delta_pct,
                 "situation": _price_situation(best, p25, median),
                 "trend": _price_trend(history),
                 "snipe_threshold": db.route_armed_threshold(origin, destination),
+                "last_seen": _row_value(best_offer, "observed_at") if best_offer is not None else None,
                 "labels": [d for d, _ in history],
                 "prices": [p for _, p in history],
             }

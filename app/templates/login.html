@@ -1,13 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Connexion{% endblock %}
-{% block chrome %}{% endblock %}
-{% block bottomnav %}{% endblock %}
-{% block content %}
+{% block chrome %}
 <div class="login-page">
   <div class="login-wrap">
-    <div class="card">
-      <div class="logo">✈️</div>
-      <h1>Agent <b>Travel</b></h1>
+    <div class="panel">
+      <div class="brand">AGENT <span>TRAVEL</span></div>
       <p class="muted">Dashboard LAN — connexion requise.</p>
       {% if error %}<div class="banner error">{{ error }}</div>{% endif %}
       <form method="post" action="/login">
