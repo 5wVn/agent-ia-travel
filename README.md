@@ -20,13 +20,22 @@ Tout le trafic réseau est **sortant uniquement** (long polling Telegram, pas de
    # éditer .env avec vos clés (voir « Obtention des clés » ci-dessous)
    ```
 
-2. Lancer :
+2. Préparer le dossier de données. Le conteneur tourne en non-root (UID `10001`) ;
+   le volume `./data` monté depuis l'hôte garde les permissions de l'hôte, il faut
+   donc le rendre inscriptible par cet UID, sinon SQLite ne peut pas créer la base :
+
+   ```sh
+   mkdir -p data
+   sudo chown -R 10001:10001 data
+   ```
+
+3. Lancer :
 
    ```sh
    docker compose up -d --build
    ```
 
-3. Vérifier l'état :
+4. Vérifier l'état :
 
    ```sh
    docker compose ps        # le healthcheck doit passer "healthy"

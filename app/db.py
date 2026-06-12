@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
@@ -90,8 +91,11 @@ class Database:
     """Thin wrapper over a SQLite connection with the project's access helpers.
 
     A single connection is reused; ``check_same_thread=False`` allows use from
-    the scheduler thread and the bot's asyncio loop. Writes are short and
-    serialized by SQLite's own locking, which is sufficient at this volume.
+    the scheduler's worker thread (collection runs via ``asyncio.to_thread``)
+    and the bot's asyncio loop thread. Because both threads share one
+    connection, every write (the ``execute`` + ``commit``/``rollback`` group)
+    is guarded by ``_write_lock`` so a transaction boundary from one thread
+    cannot commit or roll back another thread's in-flight changes.
     """
 
     def __init__(self, path: str) -> None:
@@ -101,6 +105,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA foreign_keys=ON;")
         self.conn.execute("PRAGMA busy_timeout=5000;")
+        self._write_lock = threading.Lock()
 
     def init_schema(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -112,15 +117,19 @@ class Database:
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Cursor]:
-        cur = self.conn.cursor()
-        try:
-            yield cur
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
-        finally:
-            cur.close()
+        # Serialize the whole execute+commit group: with a shared connection
+        # across threads, an unguarded commit/rollback would otherwise apply to
+        # another thread's pending changes (lost writes / spurious rollbacks).
+        with self._write_lock:
+            cur = self.conn.cursor()
+            try:
+                yield cur
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+            finally:
+                cur.close()
 
     # ----- price_observations --------------------------------------------
 

@@ -101,8 +101,16 @@ def build_calendar(year: int, month: int, role: str, min_date: Optional[date]) -
     return InlineKeyboardMarkup(rows)
 
 
-def build_time_grid(role: str, min_hour: Optional[int]) -> InlineKeyboardMarkup:
-    """Build an hours grid 06h-22h. Hours < ``min_hour`` are non-clickable."""
+def build_time_grid(
+    role: str, min_hour: Optional[int], is_end: bool = False
+) -> InlineKeyboardMarkup:
+    """Build an hours grid 06h-22h. Hours < ``min_hour`` are non-clickable.
+
+    ``is_end`` is True for the second click (choosing the end of the range):
+    the "Peu importe" button is then omitted, because it would wipe the start
+    already chosen and leave an ambiguous half-open window. "Peu importe" is
+    only meaningful at the start step, where it means "no preference at all".
+    """
     rows: list[list[InlineKeyboardButton]] = []
     hours = list(range(6, 23))
     for i in range(0, len(hours), 4):
@@ -116,7 +124,8 @@ def build_time_grid(role: str, min_hour: Optional[int]) -> InlineKeyboardMarkup:
                     InlineKeyboardButton(label, callback_data=f"{CB_TIME}:{role}:pick:{hour:02d}:00")
                 )
         rows.append(line)
-    rows.append([InlineKeyboardButton("Peu importe", callback_data=f"{CB_TIME}:{role}:any:")])
+    if not is_end:
+        rows.append([InlineKeyboardButton("Peu importe", callback_data=f"{CB_TIME}:{role}:any:")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -157,6 +166,13 @@ class TravelBot:
         app.add_handler(CommandHandler("pause", self.cmd_pause))
         app.add_handler(CommandHandler("resume", self.cmd_resume))
         app.add_handler(CallbackQueryHandler(self.on_callback))
+        app.add_error_handler(self._on_error)
+
+    async def _on_error(self, _update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Swallow handler exceptions (e.g. stale callback queries that can no
+        longer be answered/edited after 48h) so the polling loop keeps running.
+        """
+        logger.error("Erreur dans un handler Telegram : %s", ctx.error)
 
     # ----- authorization --------------------------------------------------
 
@@ -340,7 +356,7 @@ class TravelBot:
                 min_hour = int(payload[:2])
                 await query.edit_message_text(
                     f"Début {payload}. Choisis la fin de la fourchette :",
-                    reply_markup=build_time_grid(role, min_hour),
+                    reply_markup=build_time_grid(role, min_hour, is_end=True),
                 )
             else:
                 self._set_times(role, draft.pending_time_start, payload)
