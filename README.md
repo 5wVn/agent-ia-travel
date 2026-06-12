@@ -2,7 +2,7 @@
 
 Agent autonome de surveillance des prix de vols **Toulouse ⇄ Paris** (TLS ⇄ ORY/CDG, aller-retour). Il collecte les prix via une **abstraction multi-provider** (Travelpayouts/Aviasales par défaut, Amadeus en option), détecte les bonnes affaires avec un scoring déterministe, rédige une recommandation avec Claude, et demande confirmation via Telegram avant de proposer la réservation.
 
-Tout le trafic réseau est **sortant uniquement** (long polling Telegram, pas de webhook). Le NAS n'expose rien. Voir [PLAN.md](PLAN.md) pour l'architecture complète.
+Tout le trafic **internet** est sortant uniquement (long polling Telegram, pas de webhook) : rien n'est exposé sur internet. Seul le **dashboard web** écoute sur le port 8080, **en LAN uniquement** (voir la section dédiée). Voir [PLAN.md](PLAN.md) pour l'architecture complète.
 
 > ⚠️ **Migration de source de données.** Amadeus décommissionne son portail
 > **Self-Service le 17/07/2026** (clés désactivées, inscriptions gelées avant).
