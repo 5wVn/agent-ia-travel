@@ -13,8 +13,6 @@ import json
 import logging
 from typing import Any, Optional
 
-import anthropic
-
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -40,18 +38,37 @@ SYSTEM_PROMPT_DIGEST = (
 
 
 class Analyst:
-    """Wraps the Anthropic client. Falls back to templates on any failure."""
+    """Wraps the Anthropic client. Falls back to templates on any failure.
+
+    "Mode sans LLM" : when ``config.llm_enabled()`` is False (no
+    ``ANTHROPIC_API_KEY``), the Anthropic client is never instantiated and no
+    network call is ever attempted — :meth:`analyze_deal` / :meth:`daily_digest`
+    return the deterministic French templates directly. A single info log is
+    emitted at construction; there is no repeated warning.
+    """
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+        self._client: Optional[Any] = None
+        if config.llm_enabled():
+            # Imported lazily so the package boots even if `anthropic` is absent
+            # and no key is configured.
+            import anthropic
+
+            self._client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+            logger.info("LLM activé (modèle %s).", config.llm_model)
+        else:
+            logger.info("Mode sans LLM : messages template (aucune clé Anthropic).")
 
     def _call(self, system_prompt: str, user_content: str) -> Optional[str]:
         """Single Messages API call with a cached system prompt.
 
         Returns the text response, or None if the call failed (the caller then
-        uses a template fallback).
+        uses a template fallback). When the LLM is disabled the client is None
+        and we return None immediately — no network call is ever attempted.
         """
+        if self._client is None:
+            return None
         try:
             response = self._client.messages.create(
                 model=self.config.llm_model,
@@ -89,19 +106,69 @@ class Analyst:
         return _fallback_digest_message(stats_context)
 
 
+def _trend_label(recent: Any) -> Optional[str]:
+    """Describe the price trend from recent prices (most recent first)."""
+    try:
+        prices = [float(p) for p in recent]
+    except (TypeError, ValueError):
+        return None
+    if len(prices) < 2:
+        return None
+    # recent[0] is the latest; compare it to the oldest in the window.
+    latest, oldest = prices[0], prices[-1]
+    if latest < oldest * 0.97:
+        return "en baisse"
+    if latest > oldest * 1.03:
+        return "en hausse (signal dernière chance)"
+    return "stable"
+
+
 def _fallback_deal_message(ctx: dict[str, Any]) -> str:
-    """Deterministic French recommendation when the LLM is unavailable."""
+    """Deterministic French recommendation when the LLM is unavailable.
+
+    Reproduces the substance of the LLM output without any API call: prix vs
+    médiane et p10, composantes du score, tendance, et une recommandation.
+    """
     route = ctx.get("route", "?")
     price = ctx.get("price_eur", "?")
     median = ctx.get("median_30d")
+    p10 = ctx.get("p10_30d")
+    score = ctx.get("score")
+    components = ctx.get("components") or {}
     lines = [f"Bonne affaire détectée sur {route} : {price} EUR."]
+
     if median:
         try:
             pct = round((1 - float(price) / float(median)) * 100)
             lines.append(f"Médiane sur 30 jours : {median} EUR ({pct:+d} %).")
         except (TypeError, ValueError, ZeroDivisionError):
             lines.append(f"Médiane sur 30 jours : {median} EUR.")
-    lines.append("Reco : si le prix est sous ton seuil habituel, réserver est raisonnable.")
+    if p10 is not None:
+        lines.append(f"Plancher habituel (p10) : {p10} EUR.")
+
+    if score is not None:
+        detail = ", ".join(
+            f"{k} {round(float(v))}"
+            for k, v in components.items()
+            if k != "composite" and isinstance(v, (int, float))
+        )
+        score_line = f"Score : {score}/100"
+        if detail:
+            score_line += f" ({detail})"
+        lines.append(score_line + ".")
+
+    trend = _trend_label(ctx.get("recent_prices"))
+    if trend is not None:
+        lines.append(f"Tendance : {trend}.")
+
+    reco = "Reco : "
+    if trend and "hausse" in trend:
+        reco += "le prix remonte, réserver maintenant est prudent."
+    elif median and price != "?" and float(price) <= float(median) * 0.8:
+        reco += "nettement sous la médiane, réserver est raisonnable."
+    else:
+        reco += "si le prix est sous ton seuil habituel, réserver est raisonnable."
+    lines.append(reco)
     return " ".join(lines)
 
 

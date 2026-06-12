@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Optional
 
 
 def _get_float(name: str, default: float) -> float:
@@ -64,9 +65,10 @@ class Config:
     # Secrets (no defaults — must be provided via env).
     amadeus_client_id: str
     amadeus_client_secret: str
-    anthropic_api_key: str
     telegram_bot_token: str
     telegram_chat_id: str
+    # Optional: when empty/None, the LLM is disabled and templates are used.
+    anthropic_api_key: Optional[str] = None
 
     # Data.
     db_path: str = "/data/prices.db"
@@ -106,9 +108,23 @@ class Config:
     digest_hour: int = 8
     timezone: str = "Europe/Paris"
 
+    # Price sniper (PLAN.md step 4bis).
+    snipe_interval_minutes: int = 15           # boosted watch cadence
+    snipe_proximity_ratio: float = 1.15        # only watch dates < threshold * this
+    snipe_reping_interval_minutes: int = 5     # critical alert re-ping cadence
+    snipe_reping_max: int = 6                  # max number of re-pings
+    snipe_amount_min_eur: int = 30             # threshold grid lower bound
+    snipe_amount_max_eur: int = 120            # threshold grid upper bound
+    snipe_amount_step_eur: int = 5             # threshold grid step
+    snipe_grid_page_size: int = 18             # amounts shown per page
+
     def deal_price_bucket_eur(self) -> int:
         """Price bucket width (euros) used in deal_key dedup."""
         return 10
+
+    def llm_enabled(self) -> bool:
+        """True only when an Anthropic API key is configured (non-empty)."""
+        return bool(self.anthropic_api_key and self.anthropic_api_key.strip())
 
 
 def load_config() -> Config:
@@ -117,10 +133,12 @@ def load_config() -> Config:
     Raises:
         RuntimeError: if a required secret is missing.
     """
+    # ANTHROPIC_API_KEY is intentionally optional: without it the agent runs in
+    # "mode sans LLM" (template messages). Only the truly required secrets are
+    # validated here.
     required = {
         "AMADEUS_CLIENT_ID": os.environ.get("AMADEUS_CLIENT_ID"),
         "AMADEUS_CLIENT_SECRET": os.environ.get("AMADEUS_CLIENT_SECRET"),
-        "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY"),
         "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
         "TELEGRAM_CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID"),
     }
@@ -130,12 +148,16 @@ def load_config() -> Config:
             "Variables d'environnement manquantes : " + ", ".join(missing)
         )
 
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key is not None and not anthropic_key.strip():
+        anthropic_key = None
+
     routes = _parse_routes(os.environ.get("ROUTES"))
 
     return Config(
         amadeus_client_id=required["AMADEUS_CLIENT_ID"],  # type: ignore[arg-type]
         amadeus_client_secret=required["AMADEUS_CLIENT_SECRET"],  # type: ignore[arg-type]
-        anthropic_api_key=required["ANTHROPIC_API_KEY"],  # type: ignore[arg-type]
+        anthropic_api_key=anthropic_key,
         telegram_bot_token=required["TELEGRAM_BOT_TOKEN"],  # type: ignore[arg-type]
         telegram_chat_id=required["TELEGRAM_CHAT_ID"],  # type: ignore[arg-type]
         db_path=os.environ.get("DB_PATH", "/data/prices.db"),
@@ -158,6 +180,14 @@ def load_config() -> Config:
         llm_max_tokens=_get_int("LLM_MAX_TOKENS", 1024),
         digest_hour=_get_int("DIGEST_HOUR", 8),
         timezone=os.environ.get("TIMEZONE", "Europe/Paris"),
+        snipe_interval_minutes=_get_int("SNIPE_INTERVAL_MINUTES", 15),
+        snipe_proximity_ratio=_get_float("SNIPE_PROXIMITY_RATIO", 1.15),
+        snipe_reping_interval_minutes=_get_int("SNIPE_REPING_INTERVAL_MINUTES", 5),
+        snipe_reping_max=_get_int("SNIPE_REPING_MAX", 6),
+        snipe_amount_min_eur=_get_int("SNIPE_AMOUNT_MIN_EUR", 30),
+        snipe_amount_max_eur=_get_int("SNIPE_AMOUNT_MAX_EUR", 120),
+        snipe_amount_step_eur=_get_int("SNIPE_AMOUNT_STEP_EUR", 5),
+        snipe_grid_page_size=_get_int("SNIPE_GRID_PAGE_SIZE", 18),
     )
 
 

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 AMADEUS_BASE_URL = "https://test.api.amadeus.com"
 TOKEN_PATH = "/v1/security/oauth2/token"
 OFFERS_PATH = "/v2/shopping/flight-offers"
+PRICING_PATH = "/v1/shopping/flight-offers/pricing"
 
 _MAX_RETRIES = 3
 _BACKOFF_BASE_SECONDS = 2.0
@@ -232,6 +233,52 @@ class AmadeusClient:
         assert last_exc is not None
         raise last_exc
 
+    def price_offer(self, raw_offer: dict[str, Any]) -> dict[str, Any]:
+        """Re-price one raw flight offer via Flight Offers Price (anti-stale).
+
+        Used by the price sniper before raising a critical alert: the stored
+        ``raw_offer`` is POSTed back and Amadeus returns the confirmed live
+        price. Retries with exponential backoff like :meth:`search`.
+        """
+        body = {
+            "data": {
+                "type": "flight-offers-pricing",
+                "flightOffers": [raw_offer],
+            }
+        }
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                token = self._ensure_token()
+                resp = self._client.post(
+                    PRICING_PATH,
+                    json=body,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                if resp.status_code == 401:
+                    self._token = None
+                    raise httpx.HTTPStatusError(
+                        "401", request=resp.request, response=resp
+                    )
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, httpx.TransportError) as exc:
+                last_exc = exc
+                wait = _BACKOFF_BASE_SECONDS ** attempt
+                logger.warning(
+                    "Amadeus pricing tentative %d/%d échouée : %s",
+                    attempt,
+                    _MAX_RETRIES,
+                    exc,
+                )
+                if attempt < _MAX_RETRIES:
+                    time.sleep(wait)
+        assert last_exc is not None
+        raise last_exc
+
 
 def build_queries(config: Config, db: Database) -> list[SearchQuery]:
     """Build the list of searches: upcoming weekends + active tracked dates.
@@ -257,6 +304,27 @@ def build_queries(config: Config, db: Database) -> list[SearchQuery]:
     return queries
 
 
+def build_snipe_queries(config: Config, rows: list[Any]) -> list[SearchQuery]:
+    """Build searches for a given set of snipe-candidate tracked-date rows.
+
+    Each (depart, return) pair is searched on every configured route, with the
+    same per-route de-duplication as :func:`build_queries`.
+    """
+    seen: set[tuple[str, str, Optional[str]]] = set()
+    queries: list[SearchQuery] = []
+    for route in config.routes:
+        for row in rows:
+            depart, ret = row["depart_date"], row["return_date"]
+            key = (route.label(), depart, ret)
+            if key in seen:
+                continue
+            seen.add(key)
+            queries.append(
+                SearchQuery(route=route, depart_date=depart, return_date=ret)
+            )
+    return queries
+
+
 def quota_allows(config: Config, db: Database) -> bool:
     """Return False once we hit 80% of the configured monthly quota."""
     used = db.api_calls_this_month()
@@ -272,10 +340,37 @@ def quota_allows(config: Config, db: Database) -> bool:
     return True
 
 
+def standard_scan_should_defer(
+    config: Config, db: Database, snipe_candidate_count: int
+) -> bool:
+    """True when the weekend scan should skip its tick to spare quota.
+
+    Sniper collections are prioritized: when the monthly usage is within one
+    boosted-watch budget of the safety ceiling *and* at least one snipe is in
+    its proximity window, the standard scan defers so the sniper keeps enough
+    quota to re-check its dates. When no snipe is close, nothing defers.
+    """
+    if snipe_candidate_count <= 0:
+        return False
+    used = db.api_calls_this_month()
+    ceiling = int(config.amadeus_monthly_quota * config.quota_safety_ratio)
+    # Budget the sniper needs before the next standard scan: one boosted-watch
+    # pass per candidate, across every route.
+    reserve = snipe_candidate_count * max(1, len(config.routes))
+    return used + reserve >= ceiling
+
+
 def run_collection(
-    config: Config, db: Database, client: Optional[AmadeusClient] = None
+    config: Config,
+    db: Database,
+    client: Optional[AmadeusClient] = None,
+    queries: Optional[list[SearchQuery]] = None,
 ) -> list[int]:
-    """Run one full collection tick. Returns inserted observation ids.
+    """Run one collection tick. Returns inserted observation ids.
+
+    By default the queries cover upcoming weekends + tracked dates. The boosted
+    sniper watch passes an explicit, narrow ``queries`` list so it only spends
+    quota on the dates that matter.
 
     Robust by design: a failure on one query is logged and skipped; the tick
     continues. Quota is checked before each call so we stop cleanly at the
@@ -287,7 +382,8 @@ def run_collection(
 
     inserted: list[int] = []
     try:
-        queries = build_queries(config, db)
+        if queries is None:
+            queries = build_queries(config, db)
         logger.info("Collecte : %d recherches planifiées.", len(queries))
         for query in queries:
             if not quota_allows(config, db):

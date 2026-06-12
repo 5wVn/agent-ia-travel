@@ -39,6 +39,9 @@ CB_CAL = "cal"            # cal:<role>:<action>:<payload>
 CB_TIME = "tm"            # tm:<role>:<action>:<payload>
 CB_UNTRACK = "ut"         # ut:<tracked_id>
 CB_CONFIRM = "cf"         # cf:<yes|no>
+CB_SNIPE = "sn"           # sn:pick:<tracked_id> | sn:amt:<tracked_id>:<eur>
+                          # sn:page:<tracked_id>:<page> | sn:off:<tracked_id>
+CB_TRIG = "tg"            # tg:<action>:<tracked_id>  (triggered-snipe buttons)
 
 ROLE_DEPART = "d"
 ROLE_RETURN = "r"
@@ -142,6 +145,78 @@ def build_deal_keyboard(observation_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def build_amount_grid(
+    tracked_id: int,
+    min_eur: int,
+    max_eur: int,
+    step_eur: int,
+    page: int,
+    page_size: int,
+) -> InlineKeyboardMarkup:
+    """Grid of threshold amounts (e.g. 30-120 EUR, step 5), paginated.
+
+    Each amount button's callback_data is ``sn:amt:<tracked_id>:<eur>`` which
+    stays well under Telegram's 64-byte cap. Navigation buttons carry the page.
+    """
+    amounts = list(range(min_eur, max_eur + 1, step_eur))
+    pages = max(1, (len(amounts) + page_size - 1) // page_size)
+    page = max(0, min(page, pages - 1))
+    start = page * page_size
+    chunk = amounts[start : start + page_size]
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for i in range(0, len(chunk), 3):
+        line = [
+            InlineKeyboardButton(
+                f"{eur} €", callback_data=f"{CB_SNIPE}:amt:{tracked_id}:{eur}"
+            )
+            for eur in chunk[i : i + 3]
+        ]
+        rows.append(line)
+
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(
+            InlineKeyboardButton(
+                "◀", callback_data=f"{CB_SNIPE}:page:{tracked_id}:{page - 1}"
+            )
+        )
+    if pages > 1:
+        nav.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{pages}", callback_data=f"{CB_SNIPE}:noop:"
+            )
+        )
+    if page < pages - 1:
+        nav.append(
+            InlineKeyboardButton(
+                "▶", callback_data=f"{CB_SNIPE}:page:{tracked_id}:{page + 1}"
+            )
+        )
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
+
+def build_triggered_keyboard(tracked_id: int) -> InlineKeyboardMarkup:
+    """Buttons for a critical (triggered) snipe alert."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🎯 J'achète", callback_data=f"{CB_TRIG}:book:{tracked_id}"
+                ),
+                InlineKeyboardButton(
+                    "⏳ Continue à viser", callback_data=f"{CB_TRIG}:keep:{tracked_id}"
+                ),
+                InlineKeyboardButton(
+                    "🔕 Désarmer", callback_data=f"{CB_TRIG}:off:{tracked_id}"
+                ),
+            ]
+        ]
+    )
+
+
 # ----- the bot -----------------------------------------------------------
 
 
@@ -155,6 +230,9 @@ class TravelBot:
             Application.builder().token(config.telegram_bot_token).build()
         )
         self._draft = TrackDraft()
+        # Set by main.py to (re)schedule cancellable re-ping jobs for a snipe.
+        # Signature: cancel_repings(tracked_id) -> None.
+        self.cancel_repings = None  # type: ignore[assignment]
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -163,6 +241,7 @@ class TravelBot:
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("track", self.cmd_track))
         app.add_handler(CommandHandler("untrack", self.cmd_untrack))
+        app.add_handler(CommandHandler("snipe", self.cmd_snipe))
         app.add_handler(CommandHandler("pause", self.cmd_pause))
         app.add_handler(CommandHandler("resume", self.cmd_resume))
         app.add_handler(CallbackQueryHandler(self.on_callback))
@@ -196,7 +275,12 @@ class TravelBot:
             best = self.db.best_current_price(r["depart_date"], r["return_date"])
             price = f"{best['price_eur']:.0f} EUR" if best else "pas encore de prix"
             ret = f" -> {r['return_date']}" if r["return_date"] else ""
-            lines.append(f"• {r['depart_date']}{ret} : {price}")
+            line = f"• {r['depart_date']}{ret} : {price}"
+            state = r["snipe_state"] if "snipe_state" in r.keys() else None
+            if state in ("armed", "triggered") and r["snipe_price_eur"] is not None:
+                etat = "armé" if state == "armed" else "déclenché"
+                line += f"  🎯 snipe {etat} ≤ {float(r['snipe_price_eur']):.0f} €"
+            lines.append(line)
         paused = self.db.get_state("alerts_paused", "0") == "1"
         if paused:
             lines.append("\n⏸️ Alertes en pause (/resume pour réactiver).")
@@ -231,6 +315,60 @@ class TravelBot:
             "Choisis un suivi à désactiver :", reply_markup=InlineKeyboardMarkup(buttons)
         )
 
+    def _snipe_amount_grid(self, tracked_id: int, page: int = 0) -> InlineKeyboardMarkup:
+        return build_amount_grid(
+            tracked_id,
+            self.config.snipe_amount_min_eur,
+            self.config.snipe_amount_max_eur,
+            self.config.snipe_amount_step_eur,
+            page,
+            self.config.snipe_grid_page_size,
+        )
+
+    async def cmd_snipe(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """List active tracked dates to arm a snipe, plus already-armed snipes.
+
+        No active tracked date -> suggest /track. Each active date gets a button
+        to (re)arm a threshold; each armed snipe gets a disarm button.
+        """
+        if not self._authorized(update):
+            return
+        rows = self.db.active_tracked_dates()
+        if not rows:
+            await update.effective_message.reply_text(
+                "Aucune date suivie. Utilise /track pour en ajouter, "
+                "puis /snipe pour armer un seuil."
+            )
+            return
+
+        buttons: list[list[InlineKeyboardButton]] = []
+        for r in rows:
+            ret = f"→{r['return_date']}" if r["return_date"] else ""
+            label = f"🎯 {r['depart_date']}{ret}"
+            state = r["snipe_state"] if "snipe_state" in r.keys() else None
+            if state in ("armed", "triggered") and r["snipe_price_eur"] is not None:
+                label += f" (armé ≤ {float(r['snipe_price_eur']):.0f} €)"
+            buttons.append(
+                [InlineKeyboardButton(label, callback_data=f"{CB_SNIPE}:pick:{r['id']}")]
+            )
+
+        armed = self.db.armed_snipes()
+        for r in armed:
+            ret = f"→{r['return_date']}" if r["return_date"] else ""
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        f"🔕 Désarmer {r['depart_date']}{ret}",
+                        callback_data=f"{CB_SNIPE}:off:{r['id']}",
+                    )
+                ]
+            )
+        await update.effective_message.reply_text(
+            "Choisis une date à sniper (le bot achètera au meilleur prix sur "
+            "ta validation) :",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
     async def cmd_track(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
@@ -260,6 +398,10 @@ class TravelBot:
             await self._handle_untrack_callback(update, data)
         elif prefix == CB_CONFIRM:
             await self._handle_confirm_callback(update, data)
+        elif prefix == CB_SNIPE:
+            await self._handle_snipe_callback(update, data)
+        elif prefix == CB_TRIG:
+            await self._handle_triggered_callback(update, data)
 
     async def _handle_deal_callback(
         self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE, data: str
@@ -432,6 +574,85 @@ class TravelBot:
         self.db.deactivate_tracked_date(int(tracked_id_s))
         await update.callback_query.edit_message_text("🗑️ Suivi désactivé.")
 
+    # ----- snipe arming / triggered alerts --------------------------------
+
+    async def _handle_snipe_callback(self, update: Update, data: str) -> None:
+        parts = data.split(":")
+        action = parts[1]
+        query = update.callback_query
+        if action == "noop":
+            return
+        if action == "pick":
+            tracked_id = int(parts[2])
+            await query.edit_message_text(
+                "Choisis le seuil de prix (le snipe se déclenche en dessous) :",
+                reply_markup=self._snipe_amount_grid(tracked_id, page=0),
+            )
+            return
+        if action == "page":
+            tracked_id, page = int(parts[2]), int(parts[3])
+            await query.edit_message_reply_markup(
+                reply_markup=self._snipe_amount_grid(tracked_id, page=page)
+            )
+            return
+        if action == "amt":
+            tracked_id, eur = int(parts[2]), int(parts[3])
+            self.db.arm_snipe(tracked_id, float(eur))
+            tr = self.db.get_tracked_date(tracked_id)
+            ret = f"→{tr['return_date']}" if tr and tr["return_date"] else ""
+            depart = tr["depart_date"] if tr else "?"
+            await query.edit_message_text(
+                f"🎯 Snipe armé : {depart}{ret} à ≤ {eur} €."
+            )
+            return
+        if action == "off":
+            tracked_id = int(parts[2])
+            self.db.disarm_snipe(tracked_id)
+            if self.cancel_repings is not None:
+                self.cancel_repings(tracked_id)
+            await query.edit_message_text("🔕 Snipe désarmé.")
+
+    async def _handle_triggered_callback(self, update: Update, data: str) -> None:
+        _, action, tracked_id_s = data.split(":", 2)
+        tracked_id = int(tracked_id_s)
+        query = update.callback_query
+        # Any response stops the re-pings.
+        if self.cancel_repings is not None:
+            self.cancel_repings(tracked_id)
+        tr = self.db.get_tracked_date(tracked_id)
+        best = (
+            self.db.best_current_price(tr["depart_date"], tr["return_date"])
+            if tr
+            else None
+        )
+        if action == "book":
+            obs_id = int(best["id"]) if best else None
+            self.db.log_decision(obs_id, "book", note="snipe")
+            self.db.disarm_snipe(tracked_id)
+            link = best["deep_link"] if best and best["deep_link"] else None
+            if link:
+                msg = f"🎯 C'est noté ! Lien de réservation : {link}"
+            else:
+                route = (
+                    f"{best['origin']}-{best['destination']}" if best else "TLS-Paris"
+                )
+                price = f" à {float(best['price_eur']):.0f} €" if best else ""
+                msg = (
+                    f"🎯 C'est noté ! Pas de lien direct Amadeus Self-Service — "
+                    f"réserve {route}{price} sur Google Flights / le site de la "
+                    "compagnie. Snipe désarmé."
+                )
+            await query.edit_message_text(msg)
+        elif action == "keep":
+            self.db.set_snipe_state(tracked_id, "armed")
+            await query.edit_message_text(
+                "⏳ OK, je continue à viser ce prix — nouvelle alerte au prochain "
+                "passage sous le seuil."
+            )
+        elif action == "off":
+            self.db.set_snipe_state(tracked_id, None)
+            await query.edit_message_text("🔕 Snipe désarmé.")
+
     # ----- outbound alerts ------------------------------------------------
 
     async def send_alert(self, text: str, observation_id: int) -> None:
@@ -447,6 +668,46 @@ class TravelBot:
         await self.application.bot.send_message(
             chat_id=self.config.telegram_chat_id, text=text
         )
+
+    async def send_triggered_alert(self, text: str, tracked_id: int) -> int:
+        """Send a critical snipe alert (pinned) with the triggered keyboard.
+
+        Returns the message id so re-pings can be sent and the message edited
+        if the price rebounds before the user replies.
+        """
+        msg = await self.application.bot.send_message(
+            chat_id=self.config.telegram_chat_id,
+            text=text,
+            reply_markup=build_triggered_keyboard(tracked_id),
+        )
+        try:
+            await self.application.bot.pin_chat_message(
+                chat_id=self.config.telegram_chat_id,
+                message_id=msg.message_id,
+                disable_notification=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — pin is best-effort
+            logger.warning("Épinglage impossible : %s", exc)
+        return msg.message_id
+
+    async def send_reping(self, tracked_id: int, n: int, total: int) -> None:
+        """Send a re-ping for an unanswered triggered snipe."""
+        await self.application.bot.send_message(
+            chat_id=self.config.telegram_chat_id,
+            text=f"🎯 Rappel {n}/{total} : un prix snipé t'attend, réponds vite !",
+            reply_markup=build_triggered_keyboard(tracked_id),
+        )
+
+    async def edit_rebounded(self, message_id: int) -> None:
+        """Edit a triggered alert when the price climbed back above threshold."""
+        try:
+            await self.application.bot.edit_message_text(
+                chat_id=self.config.telegram_chat_id,
+                message_id=message_id,
+                text="🙁 Raté : le prix est remonté avant ta réponse. Je continue à viser.",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Édition message raté impossible : %s", exc)
 
     def alerts_paused(self) -> bool:
         return self.db.get_state("alerts_paused", "0") == "1"

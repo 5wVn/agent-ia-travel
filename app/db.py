@@ -108,9 +108,32 @@ class Database:
         self._write_lock = threading.Lock()
 
     def init_schema(self) -> None:
-        """Create tables and indexes if they do not exist."""
+        """Create tables and indexes if they do not exist, then migrate."""
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Idempotent schema migrations for databases created before a feature.
+
+        Adds the price-sniper columns on ``tracked_dates`` if they are missing.
+        ``ALTER TABLE ... ADD COLUMN`` is only issued when the column is absent,
+        so this is safe to run on every boot and on already-existing databases.
+        """
+        self._add_column_if_missing("tracked_dates", "snipe_price_eur", "REAL")
+        self._add_column_if_missing("tracked_dates", "snipe_state", "TEXT")
+
+    def _column_names(self, table: str) -> set[str]:
+        cur = self.conn.execute(f"PRAGMA table_info({table})")
+        return {row["name"] for row in cur.fetchall()}
+
+    def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
+        if column in self._column_names(table):
+            return
+        with self._write() as cur:
+            # Column/table names cannot be parameterized; they are internal
+            # constants here, never user input.
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def close(self) -> None:
         self.conn.close()
@@ -329,6 +352,59 @@ class Database:
             (depart_date, return_date, return_date),
         )
         return cur.fetchone()
+
+    def get_tracked_date(self, tracked_id: int) -> Optional[sqlite3.Row]:
+        cur = self.conn.execute(
+            "SELECT * FROM tracked_dates WHERE id = ?", (tracked_id,)
+        )
+        return cur.fetchone()
+
+    # ----- price sniper (PLAN.md step 4bis) -------------------------------
+
+    def arm_snipe(self, tracked_id: int, price_eur: float) -> None:
+        """Arm (or re-arm) a snipe on a tracked date at ``price_eur``."""
+        with self._write() as cur:
+            cur.execute(
+                """
+                UPDATE tracked_dates
+                SET snipe_price_eur = ?, snipe_state = 'armed'
+                WHERE id = ?
+                """,
+                (price_eur, tracked_id),
+            )
+
+    def set_snipe_state(self, tracked_id: int, state: Optional[str]) -> None:
+        """Set snipe_state to 'armed' / 'triggered' / NULL (disarm)."""
+        with self._write() as cur:
+            cur.execute(
+                "UPDATE tracked_dates SET snipe_state = ? WHERE id = ?",
+                (state, tracked_id),
+            )
+
+    def disarm_snipe(self, tracked_id: int) -> None:
+        """Fully disarm: clear state and threshold."""
+        with self._write() as cur:
+            cur.execute(
+                """
+                UPDATE tracked_dates
+                SET snipe_state = NULL, snipe_price_eur = NULL
+                WHERE id = ?
+                """,
+                (tracked_id,),
+            )
+
+    def armed_snipes(self) -> list[sqlite3.Row]:
+        """Active tracked dates with a snipe armed or triggered (threshold set)."""
+        cur = self.conn.execute(
+            """
+            SELECT * FROM tracked_dates
+            WHERE active = 1
+              AND snipe_state IN ('armed', 'triggered')
+              AND snipe_price_eur IS NOT NULL
+            ORDER BY depart_date
+            """
+        )
+        return cur.fetchall()
 
     # ----- flight_scores --------------------------------------------------
 

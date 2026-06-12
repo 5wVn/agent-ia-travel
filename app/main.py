@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,10 +21,17 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from .analyst import Analyst
 from .bot import TravelBot, format_deal_alert
-from .collector import run_collection
+from .collector import (
+    AmadeusClient,
+    build_snipe_queries,
+    quota_allows,
+    run_collection,
+    standard_scan_should_defer,
+)
 from .config import Config, load_config
 from .db import Database
 from .scoring import score_and_detect
+from .sniper import SnipeResult, evaluate_snipe, snipe_candidates
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,10 +127,126 @@ class App:
         self.bot = TravelBot(config, self.db)
         self.analyst = Analyst(config)
         self.scheduler = AsyncIOScheduler(timezone=config.timezone)
+        # Cancellable re-ping job ids per triggered snipe (tracked_id -> [ids]).
+        self._reping_jobs: dict[int, list[str]] = {}
+        self.bot.cancel_repings = self._cancel_repings
+
+    # ----- price sniper orchestration -------------------------------------
+
+    def _cancel_repings(self, tracked_id: int) -> None:
+        """Remove any pending re-ping jobs for a snipe (called on user reply)."""
+        for job_id in self._reping_jobs.pop(tracked_id, []):
+            try:
+                self.scheduler.remove_job(job_id)
+            except Exception:  # noqa: BLE001 — job may already have fired
+                pass
+
+    def _schedule_repings(self, tracked_id: int) -> None:
+        """Schedule up to ``snipe_reping_max`` cancellable re-ping jobs."""
+        self._cancel_repings(tracked_id)
+        ids: list[str] = []
+        total = self.config.snipe_reping_max
+        for n in range(1, total + 1):
+            job_id = f"reping:{tracked_id}:{n}"
+            self.scheduler.add_job(
+                self._reping_tick,
+                "date",
+                run_date=datetime.now(timezone.utc)
+                + timedelta(minutes=self.config.snipe_reping_interval_minutes * n),
+                args=[tracked_id, n, total],
+                id=job_id,
+                max_instances=1,
+            )
+            ids.append(job_id)
+        self._reping_jobs[tracked_id] = ids
+
+    async def _reping_tick(self, tracked_id: int, n: int, total: int) -> None:
+        """Send one re-ping, unless the snipe is no longer triggered."""
+        try:
+            tr = self.db.get_tracked_date(tracked_id)
+            if tr is None or tr["snipe_state"] != "triggered":
+                self._cancel_repings(tracked_id)
+                return
+            await self.bot.send_reping(tracked_id, n, total)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Re-ping snipe %d échoué : %s", tracked_id, exc)
+
+    async def snipe_tick(self) -> None:
+        """Boosted watch: collect only near-threshold snipes, then evaluate.
+
+        Runs every ``snipe_interval_minutes``. Quota-priority: sniper collects
+        come first, so the standard scan defers when the budget is tight (see
+        ``collection_tick``). Never raises.
+        """
+        try:
+            candidates = await asyncio.to_thread(snipe_candidates, self.config, self.db)
+            if not candidates:
+                return
+            if not await asyncio.to_thread(quota_allows, self.config, self.db):
+                logger.warning("Quota atteint — snipe tick sans collecte fraîche.")
+            else:
+                queries = build_snipe_queries(self.config, candidates)
+                await asyncio.to_thread(
+                    run_collection, self.config, self.db, None, queries
+                )
+
+            client = await asyncio.to_thread(AmadeusClient, self.config)
+            try:
+                for row in candidates:
+                    tr = self.db.get_tracked_date(int(row["id"]))
+                    if tr is None or tr["snipe_state"] != "armed":
+                        continue  # disarmed/triggered meanwhile
+                    result = await asyncio.to_thread(
+                        evaluate_snipe, self.config, self.db, tr, client
+                    )
+                    await self._handle_snipe_result(result)
+            finally:
+                await asyncio.to_thread(client.close)
+        except Exception as exc:  # noqa: BLE001 — never crash the scheduler
+            logger.error("Snipe tick échoué : %s", exc)
+
+    async def _handle_snipe_result(self, result: SnipeResult) -> None:
+        """Turn a sniper evaluation into a Telegram alert + re-ping jobs."""
+        if self.bot.alerts_paused():
+            return
+        if result.status == "triggered":
+            self.db.set_snipe_state(result.tracked_id, "triggered")
+            ret = f"→{result.return_date}" if result.return_date else ""
+            price = result.confirmed_price_eur or result.best_price_eur
+            text = (
+                f"🎯 SNIPE DÉCLENCHÉ : {result.depart_date}{ret}\n"
+                f"💶 {price:.0f} € (seuil ≤ {result.threshold_eur:.0f} €) — prix "
+                "confirmé en direct.\nValide vite avant qu'il ne remonte."
+            )
+            await self.bot.send_triggered_alert(text, result.tracked_id)
+            self._schedule_repings(result.tracked_id)
+        elif result.status == "rebounded":
+            # Live price climbed back: stay armed, no re-ping.
+            self.db.set_snipe_state(result.tracked_id, "armed")
+            logger.info(
+                "Snipe %d : prix remonté à la re-vérification, reste armé.",
+                result.tracked_id,
+            )
 
     async def collection_tick(self) -> None:
-        """One scheduled cycle: collect -> score -> alert. Never raises."""
+        """One scheduled cycle: collect -> score -> alert. Never raises.
+
+        Quota-priority: if armed snipes are close to threshold and the budget is
+        tight, the standard weekend scan defers this tick so the sniper keeps
+        enough quota for its boosted re-checks.
+        """
         try:
+            candidates = await asyncio.to_thread(
+                snipe_candidates, self.config, self.db
+            )
+            if await asyncio.to_thread(
+                standard_scan_should_defer, self.config, self.db, len(candidates)
+            ):
+                logger.info(
+                    "Scan week-ends reporté : quota réservé aux %d snipes proches.",
+                    len(candidates),
+                )
+                return
             inserted = await asyncio.to_thread(run_collection, self.config, self.db)
             deals = await asyncio.to_thread(
                 score_and_detect, self.config, self.db, inserted
@@ -172,6 +295,13 @@ class App:
             CronTrigger(hour=self.config.digest_hour, minute=0, timezone=self.config.timezone),
             id="digest",
             max_instances=1,
+        )
+        self.scheduler.add_job(
+            self.snipe_tick,
+            IntervalTrigger(minutes=self.config.snipe_interval_minutes),
+            id="snipe",
+            max_instances=1,
+            coalesce=True,
         )
 
     async def run(self) -> None:
