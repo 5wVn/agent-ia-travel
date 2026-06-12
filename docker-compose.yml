@@ -1,0 +1,12 @@
+services:
+  agent-travel:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 5m
+      timeout: 10s
+      retries: 3

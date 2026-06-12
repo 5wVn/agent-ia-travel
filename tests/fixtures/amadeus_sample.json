@@ -1,0 +1,65 @@
+{
+  "meta": {"count": 2},
+  "data": [
+    {
+      "type": "flight-offer",
+      "id": "1",
+      "validatingAirlineCodes": ["AF"],
+      "price": {"currency": "EUR", "total": "54.00", "grandTotal": "54.00"},
+      "itineraries": [
+        {
+          "duration": "PT1H15M",
+          "segments": [
+            {
+              "departure": {"iataCode": "TLS", "at": "2026-09-12T17:35:00"},
+              "arrival": {"iataCode": "ORY", "at": "2026-09-12T18:50:00"},
+              "carrierCode": "AF",
+              "number": "6123"
+            }
+          ]
+        },
+        {
+          "duration": "PT1H20M",
+          "segments": [
+            {
+              "departure": {"iataCode": "ORY", "at": "2026-09-14T19:10:00"},
+              "arrival": {"iataCode": "TLS", "at": "2026-09-14T20:30:00"},
+              "carrierCode": "AF",
+              "number": "6130"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "flight-offer",
+      "id": "2",
+      "validatingAirlineCodes": ["U2"],
+      "price": {"currency": "EUR", "total": "89.50", "grandTotal": "89.50"},
+      "itineraries": [
+        {
+          "duration": "PT1H20M",
+          "segments": [
+            {
+              "departure": {"iataCode": "TLS", "at": "2026-09-12T07:05:00"},
+              "arrival": {"iataCode": "ORY", "at": "2026-09-12T08:25:00"},
+              "carrierCode": "U2",
+              "number": "4421"
+            }
+          ]
+        },
+        {
+          "duration": "PT1H25M",
+          "segments": [
+            {
+              "departure": {"iataCode": "ORY", "at": "2026-09-14T21:40:00"},
+              "arrival": {"iataCode": "TLS", "at": "2026-09-14T23:05:00"},
+              "carrierCode": "U2",
+              "number": "4430"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
