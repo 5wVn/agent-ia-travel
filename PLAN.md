@@ -97,6 +97,14 @@ CREATE TABLE decisions (
     note          TEXT
 );
 
+-- Scores dérivés (recomputables depuis price_observations si la formule change)
+CREATE TABLE flight_scores (
+    observation_id INTEGER PRIMARY KEY REFERENCES price_observations(id),
+    computed_at    TEXT NOT NULL,
+    score          REAL NOT NULL,         -- 0–100
+    components     TEXT NOT NULL          -- JSON : {prix, horaire, confort, tendance}
+);
+
 -- Alertes envoyées (anti-spam : ne pas re-notifier le même deal)
 CREATE TABLE alerts_sent (
     id             INTEGER PRIMARY KEY,
@@ -117,8 +125,22 @@ Tout dérive de `price_observations` : la baseline (médiane 30 jours par route/
 - 1 appel Amadeus par couple (date_aller, date_retour) × 2 aéroports parisiens → budget quota maîtrisé (~16 combinaisons × 6 collectes/jour = vérifier le quota du tier gratuit, sinon passer à 2 collectes/jour).
 - Normalisation → insertion en base. Erreurs API = retry exponentiel (3 tentatives), puis log et on attend le prochain tick — jamais de crash.
 
-### Étape 2 — Détection (SQL pur, après chaque collecte)
-Un deal = `price_eur < seuil_absolu` (ex. 60 € l'A/R) **OU** `price_eur < 0.75 × médiane_glissante_30j(route, mois)`. Dédoublonnage via `alerts_sent.deal_key`.
+### Étape 2 — Scoring + détection (déterministe, après chaque collecte)
+
+Chaque vol observé reçoit un **score composite 0–100**, formule pondérée transparente (pas de ML — overkill pour ce trajet) :
+
+```
+score = 0.45 × score_prix      # position vs historique : 100 si ≤ p10 des 30 derniers jours, 0 si ≥ médiane
+      + 0.25 × score_horaire   # 100 si dans la fourchette /track, dégressif par heure d'écart
+      + 0.20 × score_confort   # direct (TLS-Paris l'est toujours) + durée + compagnie préférée/évitée
+      + 0.10 × score_tendance  # prix en baisse depuis 3 collectes = +, remontée brutale = signal "dernière chance"
+```
+
+- Poids et seuils dans `config.py` — réglables sans toucher au code.
+- Scores stockés dans une table dérivée `flight_scores` (observation_id, score, détail des composantes en JSON) : **recomputable** depuis `price_observations` si on change la formule, fidèle au principe source of truth.
+- **Alerte** si `score ≥ 80` (ou seuil prix absolu, ex. < 60 € l'A/R, en court-circuit). Dédoublonnage via `alerts_sent.deal_key`.
+- Le **digest quotidien** classe le top 5 par score au lieu de tout lister.
+- Le détail des composantes est passé au LLM en étape 3 → la reco explique *pourquoi* ce score ("prix p8 sur 30j, pile dans ta fourchette 17h–21h, tendance baissière").
 
 ### Étape 3 — Analyse LLM (uniquement si deal, ou pour le digest)
 L'agent reçoit : l'offre, l'historique de prix de la route (résumé compact), tes décisions passées. Il produit un message court : pourquoi c'est une bonne affaire, tendance (prix qui monte/descend), recommandation (réserver maintenant vs attendre).
@@ -203,7 +225,7 @@ agent-ia-travel/
 ├── app/
 │   ├── main.py            # boot : scheduler + bot
 │   ├── collector.py       # Amadeus → SQLite
-│   ├── rules.py           # détection de deals (SQL)
+│   ├── scoring.py         # score composite + détection de deals
 │   ├── analyst.py         # appels Claude (analyse, digest)
 │   ├── bot.py             # Telegram : alertes, boutons, commandes
 │   ├── db.py              # schéma + accès SQLite
