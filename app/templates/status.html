@@ -3,38 +3,55 @@
 {% block content %}
 <h1>Statut</h1>
 
+{% set pct = ((quota.used / quota.ceiling * 100) if quota.ceiling else 0) %}
+{% set pct = (pct if pct < 100 else 100) %}
+{% set level = "hi" if pct >= 85 else ("mid" if pct >= 60 else "lo") %}
+
 <div class="card">
+  <div class="head"><h2>Quota mensuel</h2>
+    <span class="badge accent">{{ quota.provider }}</span>
+  </div>
+  <div class="gauge">
+    <div class="track"><div class="fill {{ level }}" style="width: {{ pct|round(0)|int }}%"></div></div>
+    <div class="legend">
+      <span>{{ quota.used }} appels utilisés</span>
+      <span>plafond {{ quota.ceiling }}</span>
+    </div>
+  </div>
   <div class="metrics">
-    <div class="metric"><div class="v">{{ quota.provider }}</div><div class="k">Provider actif</div></div>
-    <div class="metric"><div class="v">{{ quota.used }} / {{ quota.ceiling }}</div><div class="k">Quota consommé (plafond)</div></div>
     <div class="metric"><div class="v">{{ quota.remaining }}</div><div class="k">Restant ce mois</div></div>
     <div class="metric"><div class="v">{{ active_routes }}</div><div class="k">Routes actives</div></div>
+    <div class="metric"><div class="v">{{ armed_snipes|length }}</div><div class="k">Snipes armés</div></div>
   </div>
-  <p class="muted">
+  <p class="muted" style="margin-bottom:0">
     Dernière collecte :
-    {% if last_collection %}{{ last_collection[:16]|replace("T", " ") }}{% else %}aucune pour l'instant{% endif %}
-    · Mode LLM : {% if llm_enabled %}activé ({{ llm_model }}){% else %}désactivé (messages template){% endif %}
+    {% if last_collection %}{{ last_collection|fr_datetime }}{% else %}aucune pour l'instant{% endif %}
+    ·
+    {% if llm_enabled %}<span class="badge accent">LLM {{ llm_model }}</span>{% else %}<span class="badge off">LLM désactivé</span>{% endif %}
   </p>
 </div>
 
 <h2>Snipes armés</h2>
 <div class="card">
   {% if armed_snipes %}
-  <table>
+  <table class="stacked">
     <thead><tr><th>Aller</th><th>Retour</th><th>Seuil</th><th>État</th></tr></thead>
     <tbody>
       {% for s in armed_snipes %}
       <tr>
-        <td>{{ s.depart_date }}</td>
-        <td>{{ s.return_date or "—" }}</td>
-        <td>≤ {{ "%.0f €"|format(s.snipe_price_eur) }}</td>
-        <td><span class="badge armed">{{ s.snipe_state }}</span></td>
+        <td data-label="Aller">{{ s.depart_date|fr_date }}</td>
+        <td data-label="Retour">{{ s.return_date|fr_date if s.return_date else "—" }}</td>
+        <td data-label="Seuil">≤ {{ s.snipe_price_eur|eur }}</td>
+        <td data-label="État"><span class="badge armed">{{ "armé" if s.snipe_state == "armed" else "déclenché" }}</span></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="muted">Aucun snipe armé.</p>
+  <div class="empty">
+    <span class="emoji">🎯</span>
+    <p>Aucun snipe armé. Arme un seuil depuis la page Dates pour être alerté sous un prix cible.</p>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

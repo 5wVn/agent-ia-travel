@@ -36,6 +36,60 @@ from .formatting import format_stops_roundtrip
 
 logger = logging.getLogger(__name__)
 
+NBSP = " "  # narrow no-break space, used before the euro sign / units
+
+_FR_MONTHS = [
+    "janv.", "févr.", "mars", "avr.", "mai", "juin",
+    "juil.", "août", "sept.", "oct.", "nov.", "déc.",
+]
+
+
+def format_eur(value, *, decimals: int = 0) -> str:
+    """Render a price the French way: ``54 €`` with a narrow no-break space.
+
+    ``None`` renders as an em dash so templates never print ``None``.
+    """
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.{decimals}f}{NBSP}€"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def format_fr_date(value) -> str:
+    """Render an ISO date/datetime as ``12 sept. 2026`` (French short month)."""
+    if not value:
+        return "—"
+    s = str(value)[:10]
+    try:
+        y, m, d = s.split("-")
+        return f"{int(d)} {_FR_MONTHS[int(m) - 1]} {y}"
+    except (ValueError, IndexError):
+        return s
+
+
+def format_fr_datetime(value) -> str:
+    """Render an ISO timestamp as ``12 sept. 2026 · 17h08``."""
+    if not value:
+        return "—"
+    s = str(value)
+    date_part = format_fr_date(s)
+    if len(s) >= 16 and "T" in s:
+        hh, mm = s[11:13], s[14:16]
+        return f"{date_part} · {hh}h{mm}"
+    return date_part
+
+
+def format_fr_timerange(start, end) -> str:
+    """Render a time window as ``17h–21h`` (or ``peu importe`` when unset)."""
+    if not start:
+        return "peu importe"
+    a = str(start)[:5].replace(":", "h")
+    if not end:
+        return a
+    return f"{a}–{str(end)[:5].replace(':', 'h')}"
+
 _BASE = Path(__file__).resolve().parent
 STATIC_DIR = _BASE / "static"
 TEMPLATES_DIR = _BASE / "templates"
@@ -90,7 +144,37 @@ def _provider_quota(config: Config, db: Database) -> dict:
     }
 
 
+def _price_situation(best, p25, median) -> str:
+    """Classify the best price against the route's recent distribution.
+
+    Returns one of ``good`` (≤ p25), ``neutral`` (p25..median) or ``high``
+    (above median). Defaults to ``neutral`` when history is too thin.
+    """
+    if best is None or median is None:
+        return "neutral"
+    if p25 is not None and best <= p25:
+        return "good"
+    if best <= median:
+        return "neutral"
+    return "high"
+
+
+def _price_trend(history: list) -> dict:
+    """Direction (↘/→/↗) and delta € between the last two history points."""
+    if len(history) < 2:
+        return {"dir": "flat", "delta": None}
+    prev = history[-2][1]
+    last = history[-1][1]
+    delta = last - prev
+    if delta <= -1:
+        return {"dir": "down", "delta": delta}
+    if delta >= 1:
+        return {"dir": "up", "delta": delta}
+    return {"dir": "flat", "delta": delta}
+
+
 def _overview_rows(config: Config, db: Database) -> list[dict]:
+    win = config.baseline_window_days
     rows = []
     for r in db.active_routes():
         origin, destination = r["origin"], r["destination"]
@@ -105,6 +189,8 @@ def _overview_rows(config: Config, db: Database) -> list[dict]:
             if best_offer is not None
             else None
         )
+        median = db.route_median(origin, destination, win)
+        p25 = db.route_percentile(origin, destination, 25.0, win)
         rows.append(
             {
                 "id": r["id"],
@@ -113,7 +199,11 @@ def _overview_rows(config: Config, db: Database) -> list[dict]:
                 "destination": destination,
                 "best": best,
                 "best_stops": best_stops,
-                "median": db.route_median(origin, destination, config.baseline_window_days),
+                "median": median,
+                "p25": p25,
+                "situation": _price_situation(best, p25, median),
+                "trend": _price_trend(history),
+                "snipe_threshold": db.route_armed_threshold(origin, destination),
                 "labels": [d for d, _ in history],
                 "prices": [p for _, p in history],
             }
@@ -167,6 +257,10 @@ def build_dashboard(config: Config, db: Database) -> Optional[FastAPI]:
 
     secret = config.dashboard_signing_secret()
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates.env.filters["eur"] = format_eur
+    templates.env.filters["fr_date"] = format_fr_date
+    templates.env.filters["fr_datetime"] = format_fr_datetime
+    templates.env.filters["fr_timerange"] = format_fr_timerange
     app = FastAPI(title="Agent IA Travel — Dashboard", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

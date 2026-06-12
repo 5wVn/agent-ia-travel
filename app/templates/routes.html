@@ -2,44 +2,53 @@
 {% block title %}Destinations{% endblock %}
 {% block content %}
 <h1>Destinations</h1>
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
 <div class="card">
-  <h2 style="margin-top:0">Ajouter une route</h2>
+  <div class="head"><h2>Ajouter une route</h2></div>
   <form method="post" action="/routes/add" class="formgrid">
     <div class="field">
       <label>Origine (IATA)</label>
-      <input name="origin" maxlength="3" placeholder="TLS" pattern="[A-Za-z]{3}" required style="text-transform:uppercase">
+      <input name="origin" maxlength="3" placeholder="TLS" pattern="[A-Za-z]{3}" required
+             autocapitalize="characters" style="text-transform:uppercase">
     </div>
     <div class="field">
       <label>Destination (IATA)</label>
-      <input name="destination" maxlength="3" placeholder="ORY" pattern="[A-Za-z]{3}" required style="text-transform:uppercase">
+      <input name="destination" maxlength="3" placeholder="ORY" pattern="[A-Za-z]{3}" required
+             autocapitalize="characters" style="text-transform:uppercase">
     </div>
     <button type="submit">Ajouter</button>
   </form>
 </div>
 
 <div class="card">
-  <table>
+  {% if routes %}
+  <table class="stacked">
     <thead><tr><th>Route</th><th>État</th><th></th></tr></thead>
     <tbody>
       {% for r in routes %}
       <tr>
-        <td>{{ r.origin }} → {{ r.destination }}</td>
-        <td>
+        <td data-label="Route">{{ r.origin }} → {{ r.destination }}</td>
+        <td data-label="État">
           {% if r.active %}<span class="badge on">active</span>
           {% else %}<span class="badge off">inactive</span>{% endif %}
         </td>
-        <td>
-          <form method="post" action="/routes/{{ r.id }}/toggle" class="inline">
+        <td class="actions">
+          <form method="post" action="/routes/{{ r.id }}/toggle" class="inline"
+                {% if r.active %}onsubmit="return confirm('Désactiver la route {{ r.origin }}→{{ r.destination }} ?');"{% endif %}>
             <button class="ghost" type="submit">{{ "Désactiver" if r.active else "Réactiver" }}</button>
           </form>
         </td>
       </tr>
-      {% else %}
-      <tr><td colspan="3" class="muted">Aucune route.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <div class="empty">
+    <span class="emoji">🗺️</span>
+    <div class="title">Aucune destination</div>
+    <p>Ajoute ta première route avec le formulaire ci-dessus.</p>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

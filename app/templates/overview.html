@@ -4,30 +4,64 @@
 <h1>Vue d'ensemble</h1>
 
 {% if not routes %}
-  <div class="card muted">Aucune route active. Ajoutez-en dans <a href="/routes">Destinations</a>.</div>
+  <div class="card">
+    <div class="empty">
+      <span class="emoji">🗺️</span>
+      <div class="title">Aucune route suivie</div>
+      <p>Ajoute ta première route pour commencer à traquer les prix.</p>
+      <a class="cta" href="/routes">Ajoute ta première route</a>
+    </div>
+  </div>
 {% endif %}
 
 {% for r in routes %}
-<div class="card">
-  <div class="head">
-    <h2 style="margin:0">{{ r.label }}</h2>
-  </div>
-  <div class="metrics">
-    <div class="metric">
-      <div class="v">{{ "%.0f €"|format(r.best) if r.best is not none else "—" }}</div>
-      <div class="k">Meilleur prix{% if r.best_stops %} · {{ r.best_stops }}{% endif %}</div>
+{% set tag = {"good": "Bon deal", "neutral": "Dans la moyenne", "high": "Au-dessus médiane"} %}
+<div class="card route-card">
+  <div class="route-top">
+    <div>
+      <p class="route-name">{{ r.label }}</p>
+      {% if r.best_stops %}<div class="route-sub">{{ r.best_stops }}</div>{% endif %}
     </div>
-    <div class="metric">
-      <div class="v">{{ "%.0f €"|format(r.median) if r.median is not none else "—" }}</div>
-      <div class="k">Médiane 30 j</div>
+    <div class="price-badge {{ r.situation if r.best is not none else 'empty' }}">
+      <span class="amount">{{ r.best|eur }}</span>
+      <span class="tag">{{ tag[r.situation] if r.best is not none else "Pas de prix" }}</span>
     </div>
   </div>
+
+  <div class="route-meta">
+    <div class="item">
+      <span class="lbl">Médiane 30 j</span>
+      <span class="val">{{ r.median|eur }}</span>
+    </div>
+    <div class="item">
+      <span class="lbl">Évolution</span>
+      <span class="val">
+        {% if r.trend.dir == "down" %}<span class="trend down">↘ {{ r.trend.delta|round(0)|int|abs|eur }}</span>
+        {% elif r.trend.dir == "up" %}<span class="trend up">↗ {{ r.trend.delta|round(0)|int|abs|eur }}</span>
+        {% else %}<span class="trend flat">→ stable</span>{% endif %}
+      </span>
+    </div>
+    {% if r.snipe_threshold is not none %}
+    <div class="item">
+      <span class="lbl">Snipe armé</span>
+      <span class="val"><span class="badge armed">≤ {{ r.snipe_threshold|eur }}</span></span>
+    </div>
+    {% endif %}
+  </div>
+
   {% if r.prices %}
-    <canvas id="chart-{{ r.id }}"
-            data-labels='{{ r.labels|tojson }}'
-            data-prices='{{ r.prices|tojson }}'></canvas>
+    <div class="chart-wrap">
+      <canvas id="chart-{{ r.id }}"
+              data-labels='{{ r.labels|tojson }}'
+              data-prices='{{ r.prices|tojson }}'
+              data-median='{{ r.median if r.median is not none else "" }}'
+              data-snipe='{{ r.snipe_threshold if r.snipe_threshold is not none else "" }}'></canvas>
+    </div>
   {% else %}
-    <p class="muted">Pas encore d'historique de prix pour cette route.</p>
+    <div class="empty">
+      <span class="emoji">⏳</span>
+      <p>Aucune collecte encore — la première arrive dans moins de 4 h.</p>
+    </div>
   {% endif %}
 </div>
 {% endfor %}
@@ -35,47 +69,24 @@
 <h2>Alertes récentes</h2>
 <div class="card">
   {% if alerts %}
-  <table>
+  <table class="stacked">
     <thead><tr><th>Date</th><th>Route</th><th>Vol</th><th>Prix</th></tr></thead>
     <tbody>
       {% for a in alerts %}
       <tr>
-        <td>{{ a.sent_at[:16]|replace("T", " ") }}</td>
-        <td>{% if a.origin %}{{ a.origin }}→{{ a.destination }}{% else %}—{% endif %}</td>
-        <td>{{ a.depart_date or "—" }}{% if a.return_date %} → {{ a.return_date }}{% endif %}</td>
-        <td>{{ "%.0f €"|format(a.price_eur) if a.price_eur is not none else "—" }}</td>
+        <td data-label="Date">{{ a.sent_at|fr_datetime }}</td>
+        <td data-label="Route">{% if a.origin %}{{ a.origin }}→{{ a.destination }}{% else %}—{% endif %}</td>
+        <td data-label="Vol">{{ a.depart_date|fr_date }}{% if a.return_date %} → {{ a.return_date|fr_date }}{% endif %}</td>
+        <td data-label="Prix">{{ a.price_eur|eur }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="muted">Aucune alerte envoyée pour l'instant.</p>
+  <div class="empty">
+    <span class="emoji">🔔</span>
+    <p>Aucune alerte envoyée pour l'instant. Dès qu'un bon prix sort, il apparaîtra ici.</p>
+  </div>
   {% endif %}
 </div>
-
-<script>
-window.addEventListener("load", function () {
-  document.querySelectorAll("canvas[data-prices]").forEach(function (cv) {
-    var labels = JSON.parse(cv.dataset.labels);
-    var prices = JSON.parse(cv.dataset.prices);
-    new Chart(cv.getContext("2d"), {
-      type: "line",
-      data: {
-        labels: labels,
-        datasets: [{
-          data: prices,
-          borderColor: "#4c9aff",
-          backgroundColor: "rgba(76,154,255,0.12)",
-          fill: true, tension: 0.25, pointRadius: 2,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { x: { ticks: { maxTicksLimit: 6 } }, y: { beginAtZero: false } },
-      },
-    });
-  });
-});
-</script>
 {% endblock %}

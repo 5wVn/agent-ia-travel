@@ -2,11 +2,14 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
   <title>{% block title %}Dashboard{% endblock %} · Agent IA Travel</title>
   <link rel="stylesheet" href="/static/dashboard.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/chart.min.js" defer></script>
+  <script src="/static/charts.js" defer></script>
 </head>
 <body>
   {% block chrome %}
@@ -19,12 +22,20 @@
       <a href="/status" class="{{ 'active' if active == 'status' else '' }}">Statut</a>
     </nav>
     <span class="spacer"></span>
-    <a href="/logout" class="muted">Déconnexion</a>
+    <a href="/logout" class="logout">Déconnexion</a>
   </header>
   <div class="warn-banner">⚠️ Accès LAN uniquement — pour l'accès distant, passez par le VPN/Tailscale du NAS (pas de redirection de port internet).</div>
   {% endblock %}
   <main>
     {% block content %}{% endblock %}
   </main>
+  {% block bottomnav %}
+  <nav class="bottomnav">
+    <a href="/" class="{{ 'active' if active == 'overview' else '' }}"><span class="ico">📊</span>Vue</a>
+    <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}"><span class="ico">🗺️</span>Destinations</a>
+    <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}"><span class="ico">📅</span>Dates</a>
+    <a href="/status" class="{{ 'active' if active == 'status' else '' }}"><span class="ico">⚙️</span>Statut</a>
+  </nav>
+  {% endblock %}
 </body>
 </html>

@@ -708,6 +708,60 @@ class Database:
         prices = [float(r["price_eur"]) for r in cur.fetchall()]
         return _median(prices) if prices else None
 
+    def route_percentile(
+        self,
+        origin: str,
+        destination: str,
+        percentile: float,
+        window_days: int = 30,
+        now: Optional[datetime] = None,
+    ) -> Optional[float]:
+        """Percentile (0..100) of a whole route's prices over the window, or None.
+
+        Pure read helper used by the dashboard to classify the best price
+        against the route's recent distribution (e.g. p25 = "bon deal" floor).
+        """
+        if now is None:
+            now = datetime.now(timezone.utc)
+        cutoff = datetime.fromtimestamp(
+            now.timestamp() - window_days * 86400, tz=timezone.utc
+        ).isoformat()
+        cur = self.conn.execute(
+            """
+            SELECT price_eur FROM price_observations
+            WHERE origin = ? AND destination = ? AND observed_at >= ?
+            """,
+            (origin, destination, cutoff),
+        )
+        prices = [float(r["price_eur"]) for r in cur.fetchall()]
+        return _percentile(prices, percentile) if prices else None
+
+    def route_armed_threshold(
+        self, origin: str, destination: str
+    ) -> Optional[float]:
+        """Lowest armed snipe threshold attached to a route, or None.
+
+        A tracked date with ``route_id IS NULL`` watches all active routes, so
+        it counts for every route. Pure read helper for the dashboard chart.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT MIN(t.snipe_price_eur) AS thr
+            FROM tracked_dates t
+            LEFT JOIN routes r ON r.id = t.route_id
+            WHERE t.active = 1
+              AND t.snipe_state IN ('armed', 'triggered')
+              AND t.snipe_price_eur IS NOT NULL
+              AND (
+                t.route_id IS NULL
+                OR (r.origin = ? AND r.destination = ?)
+              )
+            """,
+            (origin, destination),
+        )
+        row = cur.fetchone()
+        return float(row["thr"]) if row and row["thr"] is not None else None
+
     def route_price_history(
         self,
         origin: str,
