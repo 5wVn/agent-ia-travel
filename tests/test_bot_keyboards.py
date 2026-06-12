@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from app.bot import build_amount_grid, build_time_grid, build_triggered_keyboard
+from app.bot import (
+    build_amount_grid,
+    build_time_grid,
+    build_triggered_keyboard,
+    format_deal_alert,
+    format_triggered_alert,
+)
 
 
 def _all_callback_data(markup) -> list[str]:
@@ -71,3 +77,52 @@ def test_triggered_keyboard_callback_data_within_limit():
     assert any(cb.startswith("tg:off:") for cb in cbs)
     for cb in cbs:
         assert len(cb.encode("utf-8")) <= 64
+
+
+# ----- alert message bodies (stops mention) ------------------------------
+
+
+def _obs(**kw):
+    base = dict(
+        origin="TLS", destination="ORY", depart_date="2026-09-12",
+        return_date="2026-09-14", price_eur=54.0, transfers=0,
+        return_transfers=0,
+    )
+    base.update(kw)
+    return base
+
+
+def test_deal_alert_shows_direct():
+    text = format_deal_alert(_obs(transfers=0, return_transfers=0), "{}", "ok")
+    assert "direct" in text
+    assert "escale" not in text
+
+
+def test_deal_alert_shows_escales_and_asymmetry():
+    text = format_deal_alert(_obs(transfers=0, return_transfers=1), "{}", "ok")
+    assert "direct / retour 1 escale" in text
+
+
+def test_deal_alert_omits_stops_when_unknown():
+    text = format_deal_alert(_obs(transfers=None, return_transfers=None), "{}", "ok")
+    assert "escale" not in text
+    assert "direct" not in text
+
+
+def test_triggered_alert_shows_stops():
+    text = format_triggered_alert(
+        depart_date="2026-09-12", return_date="2026-09-14",
+        price_eur=48.0, threshold_eur=55.0, transfers=1, return_transfers=1,
+    )
+    assert "SNIPE DÉCLENCHÉ" in text
+    assert "1 escale" in text
+
+
+def test_triggered_alert_omits_stops_when_unknown():
+    text = format_triggered_alert(
+        depart_date="2026-09-12", return_date="2026-09-14",
+        price_eur=48.0, threshold_eur=55.0, transfers=None, return_transfers=None,
+    )
+    assert "escale" not in text
+    # No stops mention is appended to the flight line ("· direct" / "· N escale").
+    assert " · " not in text

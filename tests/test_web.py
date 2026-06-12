@@ -196,3 +196,39 @@ def test_overview_renders_with_seeded_prices(client):
     assert resp.status_code == 200
     assert "TLS→ORY" in resp.text
     assert "54" in resp.text
+
+
+def test_overview_shows_stops_mention(client):
+    c, dbi = client
+    _login(c)
+    # Cheapest offer on TLS→ORY is a direct flight; the overview's best-price
+    # metric should carry the shared stops mention.
+    dbi.insert_observation(
+        origin="TLS", destination="ORY", depart_date="2030-09-12",
+        return_date="2030-09-14", carrier="AF", price_eur=54.0,
+        deep_link=None, raw_offer=None, transfers=0, return_transfers=0,
+    )
+    dbi.insert_observation(
+        origin="TLS", destination="ORY", depart_date="2030-09-12",
+        return_date="2030-09-14", carrier="IB", price_eur=120.0,
+        deep_link=None, raw_offer=None, transfers=1, return_transfers=0,
+    )
+    resp = c.get("/")
+    assert resp.status_code == 200
+    # Cheapest (54 €) is the direct one -> "direct" shown next to best price.
+    assert "direct" in resp.text
+
+
+def test_dates_page_shows_best_price_with_stops(client):
+    c, dbi = client
+    _login(c)
+    dbi.insert_tracked_date(depart_date="2030-09-12", return_date="2030-09-14")
+    dbi.insert_observation(
+        origin="TLS", destination="ORY", depart_date="2030-09-12",
+        return_date="2030-09-14", carrier="IB", price_eur=99.0,
+        deep_link=None, raw_offer=None, transfers=1, return_transfers=0,
+    )
+    resp = c.get("/dates")
+    assert resp.status_code == 200
+    assert "99" in resp.text
+    assert "1 escale" in resp.text and "retour direct" in resp.text

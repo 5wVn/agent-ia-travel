@@ -61,6 +61,16 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE_SECONDS = 2.0
 
 
+def _as_int(value: Any) -> Optional[int]:
+    """Coerce a stop count to int, tolerating None / bad values (-> None)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _time_from_iso(value: Optional[str]) -> Optional[str]:
     """Extract 'HH:MM' from an ISO datetime like '2026-09-12T17:35:00Z'."""
     if not value or "T" not in value:
@@ -130,6 +140,9 @@ def normalize_offers(
             duration_min = raw.get("duration_to")
             duration_min = int(duration_min) if duration_min is not None else None
 
+            transfers = _as_int(raw.get("transfers"))
+            return_transfers = _as_int(raw.get("return_transfers"))
+
             offers.append(
                 NormalizedOffer(
                     origin=raw.get("origin") or query.route.origin,
@@ -143,6 +156,8 @@ def normalize_offers(
                     return_time=return_time,
                     duration_min=duration_min,
                     raw_offer=raw,
+                    transfers=transfers,
+                    return_transfers=return_transfers,
                 )
             )
         except (KeyError, ValueError, TypeError) as exc:

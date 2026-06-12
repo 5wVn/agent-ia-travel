@@ -20,7 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from .analyst import Analyst
-from .bot import TravelBot, format_deal_alert
+from .bot import TravelBot, format_deal_alert, format_triggered_alert
 from .collector import (
     active_routes,
     build_snipe_queries,
@@ -31,6 +31,7 @@ from .collector import (
 from .providers import build_provider
 from .config import Config, load_config
 from .db import Database
+from .formatting import format_stops_roundtrip
 from .scoring import score_and_detect
 from .sniper import SnipeResult, evaluate_snipe, snipe_candidates
 
@@ -39,6 +40,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _row_value(row, key):
+    """Read ``key`` from a sqlite3.Row or mapping, tolerating absence -> None."""
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
 
 
 def seed_route_pairs(config: Config) -> list[tuple[str, str]]:
@@ -69,12 +78,16 @@ def _build_deal_context(db: Database, config: Config, deal) -> dict:
         obs["origin"], obs["destination"], obs["depart_date"], 10.0, config.baseline_window_days
     )
     recent = db.recent_prices(obs["origin"], obs["destination"], obs["depart_date"], limit=3)
+    stops = format_stops_roundtrip(
+        _row_value(obs, "transfers"), _row_value(obs, "return_transfers")
+    )
     return {
         "route": f"{obs['origin']}-{obs['destination']}",
         "depart_date": obs["depart_date"],
         "return_date": obs["return_date"],
         "carrier": obs["carrier"],
         "price_eur": round(float(obs["price_eur"]), 2),
+        "stops": stops,
         "median_30d": round(median, 2) if median is not None else None,
         "p10_30d": round(p10, 2) if p10 is not None else None,
         "recent_prices": [round(p, 2) for p in recent],
@@ -116,7 +129,7 @@ def _build_digest_context(db: Database, config: Config) -> dict:
     top_cur = db.conn.execute(
         """
         SELECT o.origin, o.destination, o.depart_date, o.return_date,
-               o.price_eur, s.score
+               o.price_eur, o.transfers, o.return_transfers, s.score
         FROM flight_scores s
         JOIN price_observations o ON o.id = s.observation_id
         ORDER BY s.score DESC
@@ -129,6 +142,9 @@ def _build_digest_context(db: Database, config: Config) -> dict:
             "depart_date": r["depart_date"],
             "return_date": r["return_date"],
             "price_eur": round(float(r["price_eur"]), 2),
+            "stops": format_stops_roundtrip(
+                _row_value(r, "transfers"), _row_value(r, "return_transfers")
+            ),
             "score": round(float(r["score"]), 1),
         }
         for r in top_cur.fetchall()
@@ -234,16 +250,23 @@ class App:
             return
         if result.status == "triggered":
             self.db.set_snipe_state(result.tracked_id, "triggered")
-            ret = f"→{result.return_date}" if result.return_date else ""
             price = result.confirmed_price_eur or result.best_price_eur
-            text = (
-                f"🎯 SNIPE DÉCLENCHÉ : {result.depart_date}{ret}\n"
-                f"💶 {price:.0f} € (seuil ≤ {result.threshold_eur:.0f} €) — prix "
-                "confirmé en direct.\nValide vite avant qu'il ne remonte."
+            obs = (
+                self.db.get_observation(result.observation_id)
+                if result.observation_id is not None
+                else None
             )
-            if result.freshness_note:
-                # Cached provider (Travelpayouts): warn the price may have moved.
-                text += f"\n⚠️ {result.freshness_note}"
+            text = format_triggered_alert(
+                depart_date=result.depart_date,
+                return_date=result.return_date,
+                price_eur=price,
+                threshold_eur=result.threshold_eur,
+                transfers=_row_value(obs, "transfers") if obs is not None else None,
+                return_transfers=(
+                    _row_value(obs, "return_transfers") if obs is not None else None
+                ),
+                freshness_note=result.freshness_note,
+            )
             await self.bot.send_triggered_alert(text, result.tracked_id)
             self._schedule_repings(result.tracked_id)
         elif result.status == "rebounded":

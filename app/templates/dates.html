@@ -53,10 +53,11 @@
 <div class="card">
   <table>
     <thead>
-      <tr><th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th><th>Snipe</th><th></th></tr>
+      <tr><th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th><th>Meilleur prix</th><th>Snipe</th><th></th></tr>
     </thead>
     <tbody>
-      {% for d in dates %}
+      {% for item in dates %}
+      {% set d = item.row %}
       <tr>
         <td>
           {{ d.depart_date }}
@@ -68,6 +69,13 @@
           retour {{ (d.return_time_from ~ "–" ~ d.return_time_to) if d.return_time_from else "peu importe" }}
         </td>
         <td>{% if d.route_origin %}{{ d.route_origin }}→{{ d.route_destination }}{% else %}toutes{% endif %}</td>
+        <td>
+          {% if item.best is not none %}
+            {{ "%.0f €"|format(item.best) }}{% if item.best_stops %} <span class="muted">· {{ item.best_stops }}</span>{% endif %}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
         <td>
           {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
             <span class="badge armed">{{ "armé" if d.snipe_state == "armed" else "déclenché" }} ≤ {{ "%.0f €"|format(d.snipe_price_eur) }}</span>
@@ -90,7 +98,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">Aucune date suivie.</td></tr>
+      <tr><td colspan="7" class="muted">Aucune date suivie.</td></tr>
       {% endfor %}
     </tbody>
   </table>

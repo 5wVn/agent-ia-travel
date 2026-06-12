@@ -218,6 +218,8 @@ def run_collection(
                     depart_time=offer.depart_time,
                     return_time=offer.return_time,
                     duration_min=offer.duration_min,
+                    transfers=offer.transfers,
+                    return_transfers=offer.return_transfers,
                 )
                 inserted.append(obs_id)
         logger.info("Collecte terminée : %d offres insérées.", len(inserted))

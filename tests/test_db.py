@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.db import make_deal_key
+from app.db import Database, make_deal_key
 
 
 def test_schema_tables_exist(db):
@@ -23,6 +23,67 @@ def test_schema_tables_exist(db):
 def test_wal_mode_enabled(db):
     mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
+
+
+def test_transfers_columns_present(db):
+    cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(price_observations)")}
+    assert "transfers" in cols
+    assert "return_transfers" in cols
+
+
+def test_migration_idempotent_preserves_existing_db(tmp_path):
+    """A pre-existing db without the transfers columns is migrated in place,
+    its rows preserved, and re-running init_schema is a no-op."""
+    path = str(tmp_path / "legacy.db")
+    # Build a "legacy" price_observations table lacking the transfers columns.
+    legacy = Database(path)
+    legacy.conn.executescript(
+        """
+        CREATE TABLE price_observations (
+            id          INTEGER PRIMARY KEY,
+            observed_at TEXT NOT NULL,
+            origin      TEXT NOT NULL,
+            destination TEXT NOT NULL,
+            depart_date TEXT NOT NULL,
+            return_date TEXT,
+            carrier     TEXT NOT NULL,
+            price_eur   REAL NOT NULL,
+            deep_link   TEXT,
+            raw_offer   TEXT,
+            source      TEXT NOT NULL DEFAULT 'amadeus'
+        );
+        INSERT INTO price_observations
+            (observed_at, origin, destination, depart_date, carrier, price_eur)
+        VALUES ('2026-01-01T00:00:00Z', 'TLS', 'ORY', '2026-09-12', 'AF', 54.0);
+        """
+    )
+    legacy.conn.commit()
+    legacy.close()
+
+    # First init: should add the columns without dropping the existing row.
+    migrated = Database(path)
+    migrated.init_schema()
+    cols = {r["name"] for r in migrated.conn.execute("PRAGMA table_info(price_observations)")}
+    assert "transfers" in cols and "return_transfers" in cols
+    row = migrated.conn.execute("SELECT * FROM price_observations").fetchone()
+    assert row["price_eur"] == 54.0
+    assert row["transfers"] is None  # nullable, unknown on legacy rows
+    # Second init on the same db must be a harmless no-op.
+    migrated.init_schema()
+    n = migrated.conn.execute("SELECT COUNT(*) AS n FROM price_observations").fetchone()["n"]
+    assert n == 1
+    migrated.close()
+
+
+def test_insert_observation_persists_transfers(db):
+    obs_id = db.insert_observation(
+        origin="TLS", destination="ORY", depart_date="2026-09-12",
+        return_date="2026-09-14", carrier="AF", price_eur=54.0,
+        deep_link=None, raw_offer=None, transfers=0, return_transfers=1,
+    )
+    row = db.get_observation(obs_id)
+    assert row["transfers"] == 0
+    assert row["return_transfers"] == 1
 
 
 def test_insert_and_get_observation(db):

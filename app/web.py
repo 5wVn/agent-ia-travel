@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import Config
 from .db import Database
+from .formatting import format_stops_roundtrip
 
 logger = logging.getLogger(__name__)
 
@@ -94,16 +95,57 @@ def _overview_rows(config: Config, db: Database) -> list[dict]:
     for r in db.active_routes():
         origin, destination = r["origin"], r["destination"]
         history = db.route_price_history(origin, destination)
+        best_offer = db.route_best_offer(origin, destination)
+        best = float(best_offer["price_eur"]) if best_offer is not None else None
+        best_stops = (
+            format_stops_roundtrip(
+                _row_value(best_offer, "transfers"),
+                _row_value(best_offer, "return_transfers"),
+            )
+            if best_offer is not None
+            else None
+        )
         rows.append(
             {
                 "id": r["id"],
                 "label": f"{origin}→{destination}",
                 "origin": origin,
                 "destination": destination,
-                "best": db.route_best_price(origin, destination),
+                "best": best,
+                "best_stops": best_stops,
                 "median": db.route_median(origin, destination, config.baseline_window_days),
                 "labels": [d for d, _ in history],
                 "prices": [p for _, p in history],
+            }
+        )
+    return rows
+
+
+def _row_value(row, key):
+    """Read ``key`` from a sqlite3.Row or mapping, tolerating absence -> None."""
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _dates_rows(db: Database) -> list[dict]:
+    """Tracked dates augmented with their best observed price + stops mention."""
+    rows = []
+    for d in db.all_tracked_dates_with_routes():
+        best = db.best_current_price(d["depart_date"], d["return_date"])
+        rows.append(
+            {
+                "row": d,
+                "best": float(best["price_eur"]) if best is not None else None,
+                "best_stops": (
+                    format_stops_roundtrip(
+                        _row_value(best, "transfers"),
+                        _row_value(best, "return_transfers"),
+                    )
+                    if best is not None
+                    else None
+                ),
             }
         )
     return rows
@@ -241,7 +283,7 @@ def build_dashboard(config: Config, db: Database) -> Optional[FastAPI]:
             "dates.html",
             {
                 "active": "dates",
-                "dates": db.all_tracked_dates_with_routes(),
+                "dates": _dates_rows(db),
                 "routes": db.active_routes(),
                 "time_choices": TIME_CHOICES,
                 "error": error,

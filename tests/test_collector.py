@@ -57,6 +57,50 @@ def test_normalize_offers_second_carrier_and_price():
     assert second.depart_time == "07:05"
 
 
+def test_normalize_offers_transfers_from_fixture():
+    """Direct fixture itineraries (1 segment each) yield 0 stops on both legs."""
+    payload = _load()
+    query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")
+    offers = normalize_offers(payload, query)
+    assert offers[0].transfers == 0
+    assert offers[0].return_transfers == 0
+
+
+def test_normalize_offers_transfers_segments_minus_one():
+    """Amadeus stops = number of segments - 1, computed per itinerary."""
+    payload = {
+        "data": [
+            {
+                "price": {"grandTotal": "150.00"},
+                "validatingAirlineCodes": ["IB"],
+                "itineraries": [
+                    {
+                        "duration": "PT5H",
+                        "segments": [
+                            {"departure": {"at": "2026-09-12T09:15:00"},
+                             "carrierCode": "IB"},
+                            {"departure": {"at": "2026-09-12T12:30:00"},
+                             "carrierCode": "IB"},
+                        ],
+                    },
+                    {
+                        "duration": "PT2H",
+                        "segments": [
+                            {"departure": {"at": "2026-09-14T18:00:00"},
+                             "carrierCode": "IB"},
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")
+    offers = normalize_offers(payload, query)
+    assert len(offers) == 1
+    assert offers[0].transfers == 1  # 2 outbound segments - 1
+    assert offers[0].return_transfers == 0  # 1 inbound segment - 1
+
+
 def test_normalize_skips_malformed_offer():
     payload = {"data": [{"id": "broken"}]}  # no price, no itineraries
     query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")

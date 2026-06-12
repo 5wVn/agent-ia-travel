@@ -30,6 +30,7 @@ from telegram.ext import (
 
 from .config import Config
 from .db import Database
+from .formatting import format_stops_roundtrip
 
 logger = logging.getLogger(__name__)
 
@@ -715,11 +716,56 @@ class TravelBot:
         return self.db.get_state("alerts_paused", "0") == "1"
 
 
+def _obs_get(obs: Any, key: str) -> Any:
+    """Read ``key`` from a sqlite3.Row or plain mapping, tolerating absence."""
+    try:
+        return obs[key]
+    except (KeyError, IndexError, TypeError):
+        try:
+            return obs.get(key)  # type: ignore[union-attr]
+        except AttributeError:
+            return None
+
+
+def format_triggered_alert(
+    depart_date: str,
+    return_date: Optional[str],
+    price_eur: float,
+    threshold_eur: float,
+    transfers: Optional[int] = None,
+    return_transfers: Optional[int] = None,
+    freshness_note: Optional[str] = None,
+) -> str:
+    """Build the critical (triggered) snipe alert body shown above the buttons.
+
+    The flight line carries the number of stops (escales) when known, phrased by
+    the shared :func:`format_stops_roundtrip` helper.
+    """
+    ret = f"→{return_date}" if return_date else ""
+    flight_line = f"💶 {price_eur:.0f} € (seuil ≤ {threshold_eur:.0f} €)"
+    stops = format_stops_roundtrip(transfers, return_transfers)
+    if stops:
+        flight_line += f" · {stops}"
+    text = (
+        f"🎯 SNIPE DÉCLENCHÉ : {depart_date}{ret}\n"
+        f"{flight_line} — prix confirmé en direct.\n"
+        "Valide vite avant qu'il ne remonte."
+    )
+    if freshness_note:
+        text += f"\n⚠️ {freshness_note}"
+    return text
+
+
 def format_deal_alert(obs: dict, components_json: str, llm_text: str) -> str:
     """Build the alert message body shown above the inline buttons."""
     route = f"{obs['origin']}→{obs['destination']}"
     ret = f" A/R {obs['depart_date']} → {obs['return_date']}" if obs["return_date"] else f" {obs['depart_date']}"
     header = f"✈️ Deal {route}{ret}\n💶 {obs['price_eur']:.0f} EUR"
+    stops = format_stops_roundtrip(
+        _obs_get(obs, "transfers"), _obs_get(obs, "return_transfers")
+    )
+    if stops:
+        header += f" · {stops}"
     try:
         comp = json.loads(components_json)
         header += f"  (score {comp.get('composite', '?')})"

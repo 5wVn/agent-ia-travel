@@ -90,6 +90,40 @@ def test_normalize_second_offer():
     assert second.depart_time == "07:05"
 
 
+def test_normalize_extracts_transfers():
+    payload = _load()
+    query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")
+    offers = normalize_offers(payload, query)
+    assert offers[0].transfers == 0
+    assert offers[0].return_transfers == 0
+
+
+def test_normalize_transfers_nonzero_and_asymmetric():
+    """v3 transfers / return_transfers are mapped per leg, even when missing."""
+    payload = {
+        "data": [
+            {
+                "origin": "TLS", "destination": "ORY", "price": 120,
+                "airline": "IB", "departure_at": "2026-09-12T09:15:00Z",
+                "return_at": "2026-09-14T18:00:00Z",
+                "transfers": 1, "return_transfers": 0, "duration_to": 160,
+                "link": "/search/X",
+            },
+            {
+                "origin": "TLS", "destination": "ORY", "price": 60,
+                "airline": "AF", "departure_at": "2026-09-12T07:00:00Z",
+                "link": "/search/Y",  # no transfers fields at all
+            },
+        ]
+    }
+    query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")
+    offers = normalize_offers(payload, query)
+    assert offers[0].transfers == 1
+    assert offers[0].return_transfers == 0
+    assert offers[1].transfers is None
+    assert offers[1].return_transfers is None
+
+
 def test_normalize_skips_priceless_offer():
     payload = {"data": [{"origin": "TLS", "destination": "ORY"}]}  # no price
     query = SearchQuery(Route("TLS", "ORY"), "2026-09-12", "2026-09-14")

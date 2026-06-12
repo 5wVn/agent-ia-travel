@@ -42,6 +42,9 @@ class NormalizedOffer:
     return_time: Optional[str]
     duration_min: Optional[int]
     raw_offer: dict[str, Any]
+    # Number of stops per itinerary (None = unknown). Displayed only.
+    transfers: Optional[int] = None
+    return_transfers: Optional[int] = None
 
 
 @dataclass

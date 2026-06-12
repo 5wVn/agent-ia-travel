@@ -135,7 +135,11 @@ def _fallback_deal_message(ctx: dict[str, Any]) -> str:
     p10 = ctx.get("p10_30d")
     score = ctx.get("score")
     components = ctx.get("components") or {}
-    lines = [f"Bonne affaire détectée sur {route} : {price} EUR."]
+    stops = ctx.get("stops")
+    head = f"Bonne affaire détectée sur {route} : {price} EUR"
+    if stops:
+        head += f" ({stops})"
+    lines = [head + "."]
 
     if median:
         try:
@@ -186,8 +190,11 @@ def _fallback_digest_message(ctx: dict[str, Any]) -> str:
     if top:
         lines.append("Top offres :")
         for deal in top[:5]:
+            stops = deal.get("stops")
+            stops_txt = f", {stops}" if stops else ""
             lines.append(
                 f"- {deal.get('route', '?')} {deal.get('depart_date', '?')} : "
-                f"{deal.get('price_eur', '?')} EUR (score {deal.get('score', '?')})."
+                f"{deal.get('price_eur', '?')} EUR{stops_txt} "
+                f"(score {deal.get('score', '?')})."
             )
     return "\n".join(lines)

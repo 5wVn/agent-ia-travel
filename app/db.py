@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS price_observations (
     source        TEXT NOT NULL DEFAULT 'amadeus',
     depart_time   TEXT,
     return_time   TEXT,
-    duration_min  INTEGER
+    duration_min  INTEGER,
+    transfers        INTEGER,
+    return_transfers INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_obs_route_date
     ON price_observations(origin, destination, depart_date, observed_at);
@@ -135,6 +137,11 @@ class Database:
         self._add_column_if_missing("tracked_dates", "snipe_state", "TEXT")
         self._add_column_if_missing(
             "tracked_dates", "route_id", "INTEGER REFERENCES routes(id)"
+        )
+        # Number of stops per itinerary (NULL = unknown), displayed only.
+        self._add_column_if_missing("price_observations", "transfers", "INTEGER")
+        self._add_column_if_missing(
+            "price_observations", "return_transfers", "INTEGER"
         )
 
     def _column_names(self, table: str) -> set[str]:
@@ -263,6 +270,8 @@ class Database:
         depart_time: Optional[str] = None,
         return_time: Optional[str] = None,
         duration_min: Optional[int] = None,
+        transfers: Optional[int] = None,
+        return_transfers: Optional[int] = None,
         observed_at: Optional[str] = None,
     ) -> int:
         """Insert one observation and return its id. Never overwrites."""
@@ -274,8 +283,9 @@ class Database:
                 INSERT INTO price_observations
                     (observed_at, origin, destination, depart_date, return_date,
                      carrier, price_eur, deep_link, raw_offer, source,
-                     depart_time, return_time, duration_min)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     depart_time, return_time, duration_min,
+                     transfers, return_transfers)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at or _now(),
@@ -291,6 +301,8 @@ class Database:
                     depart_time,
                     return_time,
                     duration_min,
+                    transfers,
+                    return_transfers,
                 ),
             )
             return int(cur.lastrowid)
@@ -657,6 +669,21 @@ class Database:
         )
         row = cur.fetchone()
         return float(row["mn"]) if row and row["mn"] is not None else None
+
+    def route_best_offer(
+        self, origin: str, destination: str
+    ) -> Optional[sqlite3.Row]:
+        """Cheapest observed offer row for a route (incl. transfers), or None."""
+        cur = self.conn.execute(
+            """
+            SELECT * FROM price_observations
+            WHERE origin = ? AND destination = ?
+            ORDER BY price_eur ASC
+            LIMIT 1
+            """,
+            (origin, destination),
+        )
+        return cur.fetchone()
 
     def route_median(
         self,

@@ -98,8 +98,11 @@ def normalize_offers(
                 (first_seg.get("departure") or {}).get("at")
             )
             duration_min = _iso_duration_to_minutes(outbound.get("duration"))
+            # Stops = segments - 1 for the itinerary (displayed only).
+            transfers = len(out_segments) - 1
 
             return_time: Optional[str] = None
+            return_transfers: Optional[int] = None
             if len(itineraries) > 1:
                 inbound = itineraries[1]
                 in_segments = inbound.get("segments") or []
@@ -107,6 +110,7 @@ def normalize_offers(
                     return_time = _segment_time(
                         (in_segments[0].get("departure") or {}).get("at")
                     )
+                    return_transfers = len(in_segments) - 1
 
             validating = raw.get("validatingAirlineCodes") or []
             carrier = validating[0] if validating else first_seg.get(
@@ -126,6 +130,8 @@ def normalize_offers(
                     return_time=return_time,
                     duration_min=duration_min,
                     raw_offer=raw,
+                    transfers=transfers,
+                    return_transfers=return_transfers,
                 )
             )
         except (KeyError, ValueError, TypeError) as exc:

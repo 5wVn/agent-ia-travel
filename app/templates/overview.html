@@ -15,7 +15,7 @@
   <div class="metrics">
     <div class="metric">
       <div class="v">{{ "%.0f €"|format(r.best) if r.best is not none else "—" }}</div>
-      <div class="k">Meilleur prix</div>
+      <div class="k">Meilleur prix{% if r.best_stops %} · {{ r.best_stops }}{% endif %}</div>
     </div>
     <div class="metric">
       <div class="v">{{ "%.0f €"|format(r.median) if r.median is not none else "—" }}</div>
