@@ -3,6 +3,10 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Dashboard web LAN uniquement (port 8080). NE PAS rediriger ce port vers
+    # internet — accès distant via le VPN/Tailscale du NAS.
+    ports:
+      - "8080:8080"
     volumes:
       - ./data:/data
     healthcheck:

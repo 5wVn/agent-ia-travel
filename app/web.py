@@ -1,0 +1,332 @@
+"""Web dashboard (PLAN.md phase 4) — FastAPI served in the same asyncio loop.
+
+Run as a uvicorn task on the bot's event loop (``uvicorn.Server(...).serve()``),
+*not* ``uvicorn.run`` which would create its own loop. The dashboard shares the
+:class:`app.db.Database` (and therefore its write lock) with the bot and the
+scheduler, so Telegram and the dashboard write to the same source of truth.
+
+Design constraints honoured here:
+  - LAN only, password-protected (``DASHBOARD_PASSWORD``); without it the
+    dashboard is disabled (see :func:`build_dashboard`).
+  - server-rendered Jinja2 + htmx + Chart.js, all vendored in ``app/static`` —
+    zero CDN, zero Node build.
+  - no SQL in this module: every read/write goes through ``Database`` helpers,
+    so the ``_write_lock`` discipline is respected.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import re
+import time
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from .config import Config
+from .db import Database
+
+logger = logging.getLogger(__name__)
+
+_BASE = Path(__file__).resolve().parent
+STATIC_DIR = _BASE / "static"
+TEMPLATES_DIR = _BASE / "templates"
+
+SESSION_COOKIE = "dashboard_session"
+SESSION_TTL_SECONDS = 7 * 24 * 3600
+IATA_RE = re.compile(r"^[A-Z]{3}$")
+TIME_CHOICES = ["", "06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"]
+
+
+# ----- session signing (stdlib HMAC, no extra dependency) ----------------
+
+
+def _sign(secret: str, value: str) -> str:
+    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+def make_session_token(secret: str, now: Optional[float] = None) -> str:
+    """Issue a signed session token ``<issued_at>.<hmac>``."""
+    issued = str(int(now if now is not None else time.time()))
+    return f"{issued}.{_sign(secret, issued)}"
+
+
+def verify_session_token(secret: str, token: str, now: Optional[float] = None) -> bool:
+    """Validate a session token's signature and TTL (constant-time compare)."""
+    if not token or "." not in token:
+        return False
+    issued_s, sig = token.rsplit(".", 1)
+    if not hmac.compare_digest(_sign(secret, issued_s), sig):
+        return False
+    try:
+        issued = int(issued_s)
+    except ValueError:
+        return False
+    current = now if now is not None else time.time()
+    return 0 <= current - issued <= SESSION_TTL_SECONDS
+
+
+# ----- helpers -----------------------------------------------------------
+
+
+def _provider_quota(config: Config, db: Database) -> dict:
+    used = db.api_calls_this_month()
+    total = config.provider_monthly_quota()
+    ceiling = int(total * config.quota_safety_ratio)
+    return {
+        "provider": config.flight_provider,
+        "used": used,
+        "total": total,
+        "ceiling": ceiling,
+        "remaining": max(0, ceiling - used),
+    }
+
+
+def _overview_rows(config: Config, db: Database) -> list[dict]:
+    rows = []
+    for r in db.active_routes():
+        origin, destination = r["origin"], r["destination"]
+        history = db.route_price_history(origin, destination)
+        rows.append(
+            {
+                "id": r["id"],
+                "label": f"{origin}→{destination}",
+                "origin": origin,
+                "destination": destination,
+                "best": db.route_best_price(origin, destination),
+                "median": db.route_median(origin, destination, config.baseline_window_days),
+                "labels": [d for d, _ in history],
+                "prices": [p for _, p in history],
+            }
+        )
+    return rows
+
+
+def build_dashboard(config: Config, db: Database) -> Optional[FastAPI]:
+    """Build the FastAPI app, or return None when the dashboard is disabled.
+
+    Disabled = no ``DASHBOARD_PASSWORD``; we log an info line and the caller
+    simply does not start the uvicorn task.
+    """
+    if not config.dashboard_enabled():
+        logger.info(
+            "Dashboard désactivé : DASHBOARD_PASSWORD non défini "
+            "(définissez-le pour activer l'interface web LAN sur le port %d).",
+            config.dashboard_port,
+        )
+        return None
+
+    secret = config.dashboard_signing_secret()
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    app = FastAPI(title="Agent IA Travel — Dashboard", docs_url=None, redoc_url=None)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    def authed(request: Request) -> bool:
+        return verify_session_token(secret, request.cookies.get(SESSION_COOKIE, ""))
+
+    def redirect_login() -> RedirectResponse:
+        return RedirectResponse("/login", status_code=302)
+
+    # ----- auth ----------------------------------------------------------
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_form(request: Request, error: Optional[str] = None):
+        return templates.TemplateResponse(
+            request, "login.html", {"error": error}
+        )
+
+    @app.post("/login")
+    async def login_submit(request: Request, password: str = Form("")):
+        if hmac.compare_digest(password, config.dashboard_password or ""):
+            resp = RedirectResponse("/", status_code=302)
+            resp.set_cookie(
+                SESSION_COOKIE,
+                make_session_token(secret),
+                httponly=True,
+                samesite="lax",
+                max_age=SESSION_TTL_SECONDS,
+            )
+            return resp
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "Mot de passe incorrect."},
+            status_code=401,
+        )
+
+    @app.get("/logout")
+    async def logout():
+        resp = RedirectResponse("/login", status_code=302)
+        resp.delete_cookie(SESSION_COOKIE)
+        return resp
+
+    # ----- overview ------------------------------------------------------
+
+    @app.get("/", response_class=HTMLResponse)
+    async def overview(request: Request):
+        if not authed(request):
+            return redirect_login()
+        return templates.TemplateResponse(
+            request,
+            "overview.html",
+            {
+                "active": "overview",
+                "routes": _overview_rows(config, db),
+                "alerts": db.recent_alerts(),
+            },
+        )
+
+    # ----- routes / destinations -----------------------------------------
+
+    @app.get("/routes", response_class=HTMLResponse)
+    async def routes_page(request: Request, error: Optional[str] = None):
+        if not authed(request):
+            return redirect_login()
+        return templates.TemplateResponse(
+            request,
+            "routes.html",
+            {
+                "active": "routes",
+                "routes": db.all_routes(),
+                "error": error,
+            },
+        )
+
+    @app.post("/routes/add")
+    async def routes_add(request: Request, origin: str = Form(""), destination: str = Form("")):
+        if not authed(request):
+            return redirect_login()
+        o, d = origin.strip().upper(), destination.strip().upper()
+        if not IATA_RE.match(o) or not IATA_RE.match(d):
+            return RedirectResponse(
+                "/routes?error=Codes+IATA+invalides+(3+lettres,+ex.+TLS).",
+                status_code=302,
+            )
+        if o == d:
+            return RedirectResponse(
+                "/routes?error=Origine+et+destination+identiques.", status_code=302
+            )
+        try:
+            db.add_route(o, d)
+        except Exception:  # noqa: BLE001 — UNIQUE violation = doublon
+            return RedirectResponse(
+                "/routes?error=Cette+route+existe+déjà.", status_code=302
+            )
+        return RedirectResponse("/routes", status_code=302)
+
+    @app.post("/routes/{route_id}/toggle")
+    async def routes_toggle(request: Request, route_id: int):
+        if not authed(request):
+            return redirect_login()
+        row = db.get_route(route_id)
+        if row is not None:
+            db.set_route_active(route_id, not bool(row["active"]))
+        return RedirectResponse("/routes", status_code=302)
+
+    # ----- dates ---------------------------------------------------------
+
+    @app.get("/dates", response_class=HTMLResponse)
+    async def dates_page(request: Request, error: Optional[str] = None):
+        if not authed(request):
+            return redirect_login()
+        return templates.TemplateResponse(
+            request,
+            "dates.html",
+            {
+                "active": "dates",
+                "dates": db.all_tracked_dates_with_routes(),
+                "routes": db.active_routes(),
+                "time_choices": TIME_CHOICES,
+                "error": error,
+            },
+        )
+
+    @app.post("/dates/add")
+    async def dates_add(
+        request: Request,
+        depart_date: str = Form(""),
+        return_date: str = Form(""),
+        depart_time_from: str = Form(""),
+        depart_time_to: str = Form(""),
+        return_time_from: str = Form(""),
+        return_time_to: str = Form(""),
+        route_id: str = Form(""),
+    ):
+        if not authed(request):
+            return redirect_login()
+        if not depart_date.strip():
+            return RedirectResponse(
+                "/dates?error=Date+de+départ+requise.", status_code=302
+            )
+        rid: Optional[int] = None
+        if route_id.strip():
+            try:
+                rid = int(route_id)
+            except ValueError:
+                rid = None
+        db.insert_tracked_date(
+            depart_date=depart_date.strip(),
+            return_date=return_date.strip() or None,
+            depart_time_from=depart_time_from.strip() or None,
+            depart_time_to=depart_time_to.strip() or None,
+            return_time_from=return_time_from.strip() or None,
+            return_time_to=return_time_to.strip() or None,
+            route_id=rid,
+        )
+        return RedirectResponse("/dates", status_code=302)
+
+    @app.post("/dates/{tracked_id}/deactivate")
+    async def dates_deactivate(request: Request, tracked_id: int):
+        if not authed(request):
+            return redirect_login()
+        db.deactivate_tracked_date(tracked_id)
+        return RedirectResponse("/dates", status_code=302)
+
+    @app.post("/dates/{tracked_id}/arm")
+    async def dates_arm(request: Request, tracked_id: int, threshold: str = Form("")):
+        if not authed(request):
+            return redirect_login()
+        try:
+            price = float(threshold)
+        except ValueError:
+            return RedirectResponse(
+                "/dates?error=Seuil+invalide.", status_code=302
+            )
+        db.arm_snipe(tracked_id, price)
+        return RedirectResponse("/dates", status_code=302)
+
+    @app.post("/dates/{tracked_id}/disarm")
+    async def dates_disarm(request: Request, tracked_id: int):
+        if not authed(request):
+            return redirect_login()
+        db.disarm_snipe(tracked_id)
+        return RedirectResponse("/dates", status_code=302)
+
+    # ----- status --------------------------------------------------------
+
+    @app.get("/status", response_class=HTMLResponse)
+    async def status_page(request: Request):
+        if not authed(request):
+            return redirect_login()
+        return templates.TemplateResponse(
+            request,
+            "status.html",
+            {
+                "active": "status",
+                "quota": _provider_quota(config, db),
+                "last_collection": db.last_collection_at(),
+                "llm_enabled": config.llm_enabled(),
+                "llm_model": config.llm_model,
+                "active_routes": len(db.active_routes()),
+                "armed_snipes": db.armed_snipes(),
+            },
+        )
+
+    return app

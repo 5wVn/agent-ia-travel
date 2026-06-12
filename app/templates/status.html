@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Statut{% endblock %}
+{% block content %}
+<h1>Statut</h1>
+
+<div class="card">
+  <div class="metrics">
+    <div class="metric"><div class="v">{{ quota.provider }}</div><div class="k">Provider actif</div></div>
+    <div class="metric"><div class="v">{{ quota.used }} / {{ quota.ceiling }}</div><div class="k">Quota consommé (plafond)</div></div>
+    <div class="metric"><div class="v">{{ quota.remaining }}</div><div class="k">Restant ce mois</div></div>
+    <div class="metric"><div class="v">{{ active_routes }}</div><div class="k">Routes actives</div></div>
+  </div>
+  <p class="muted">
+    Dernière collecte :
+    {% if last_collection %}{{ last_collection[:16]|replace("T", " ") }}{% else %}aucune pour l'instant{% endif %}
+    · Mode LLM : {% if llm_enabled %}activé ({{ llm_model }}){% else %}désactivé (messages template){% endif %}
+  </p>
+</div>
+
+<h2>Snipes armés</h2>
+<div class="card">
+  {% if armed_snipes %}
+  <table>
+    <thead><tr><th>Aller</th><th>Retour</th><th>Seuil</th><th>État</th></tr></thead>
+    <tbody>
+      {% for s in armed_snipes %}
+      <tr>
+        <td>{{ s.depart_date }}</td>
+        <td>{{ s.return_date or "—" }}</td>
+        <td>≤ {{ "%.0f €"|format(s.snipe_price_eur) }}</td>
+        <td><span class="badge armed">{{ s.snipe_state }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Aucun snipe armé.</p>
+  {% endif %}
+</div>
+{% endblock %}

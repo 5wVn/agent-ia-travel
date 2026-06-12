@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Connexion{% endblock %}
+{% block chrome %}{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="card">
+    <h1>✈️ Agent IA Travel</h1>
+    <p class="muted">Dashboard LAN — connexion requise.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <input type="password" name="password" placeholder="Mot de passe" autofocus required>
+      <button type="submit">Se connecter</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

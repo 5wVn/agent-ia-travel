@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Dashboard{% endblock %} · Agent IA Travel</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/chart.min.js" defer></script>
+</head>
+<body>
+  {% block chrome %}
+  <header class="topbar">
+    <span class="brand">✈️ Agent IA Travel</span>
+    <nav class="tabs">
+      <a href="/" class="{{ 'active' if active == 'overview' else '' }}">Vue d'ensemble</a>
+      <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}">Destinations</a>
+      <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}">Dates</a>
+      <a href="/status" class="{{ 'active' if active == 'status' else '' }}">Statut</a>
+    </nav>
+    <span class="spacer"></span>
+    <a href="/logout" class="muted">Déconnexion</a>
+  </header>
+  <div class="warn-banner">⚠️ Accès LAN uniquement — pour l'accès distant, passez par le VPN/Tailscale du NAS (pas de redirection de port internet).</div>
+  {% endblock %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

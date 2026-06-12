@@ -264,13 +264,15 @@ class TravelBot:
     async def cmd_status(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
+        n_routes = len(self.db.active_routes())
         rows = self.db.active_tracked_dates()
         if not rows:
             await update.effective_message.reply_text(
-                "Aucun suivi actif. Utilise /track pour en ajouter."
+                f"Aucun suivi actif ({n_routes} routes actives). "
+                "Utilise /track pour en ajouter."
             )
             return
-        lines = ["Suivis actifs :"]
+        lines = [f"Suivis actifs ({n_routes} routes actives) :"]
         for r in rows:
             best = self.db.best_current_price(r["depart_date"], r["return_date"])
             price = f"{best['price_eur']:.0f} EUR" if best else "pas encore de prix"

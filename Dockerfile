@@ -9,8 +9,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code.
+# Application code (includes app/templates and app/static for the dashboard).
 COPY app/ ./app/
+
+# Dashboard web (LAN only, port 8080). Not exposed to internet — access via the
+# NAS VPN/Tailscale. Disabled unless DASHBOARD_PASSWORD is set.
+EXPOSE 8080
 
 # Data volume mount point.
 RUN mkdir -p /data && chown -R appuser:appuser /data /app

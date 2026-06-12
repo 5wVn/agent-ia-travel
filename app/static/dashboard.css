@@ -1,0 +1,97 @@
+/* Agent IA Travel — dashboard. Single custom stylesheet, dark-mode friendly. */
+:root {
+  --bg: #0f1419;
+  --surface: #1a212b;
+  --surface-2: #222b37;
+  --border: #2c3744;
+  --text: #e6edf3;
+  --muted: #8b97a5;
+  --accent: #4c9aff;
+  --good: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #f0f3f7;
+    --border: #d8dee6;
+    --text: #1a212b;
+    --muted: #5b6675;
+    --accent: #1f6feb;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+a { color: var(--accent); text-decoration: none; }
+header.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.9rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+header.topbar .brand { font-weight: 700; font-size: 1.05rem; }
+nav.tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+nav.tabs a {
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+nav.tabs a.active { background: var(--surface-2); color: var(--text); }
+nav.tabs a:hover { color: var(--text); }
+.spacer { flex: 1; }
+main { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.card .head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.metrics { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 0.5rem 0 0.75rem; }
+.metric .v { font-size: 1.3rem; font-weight: 700; }
+.metric .k { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+canvas { max-height: 160px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+.badge.on { background: rgba(63,185,80,0.15); color: var(--good); }
+.badge.off { background: rgba(139,151,165,0.18); color: var(--muted); }
+.badge.armed { background: rgba(210,153,34,0.18); color: var(--warn); }
+form.inline { display: inline; margin: 0; }
+input, select, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+button { cursor: pointer; background: var(--accent); color: #fff; border: none; }
+button.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+button.danger { background: var(--bad); }
+.formgrid { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; }
+.field label { font-size: 0.75rem; color: var(--muted); }
+.error { background: rgba(248,81,73,0.15); color: var(--bad); padding: 0.6rem 0.8rem; border-radius: 8px; margin-bottom: 1rem; }
+.muted { color: var(--muted); }
+.login-wrap { max-width: 340px; margin: 12vh auto; }
+.login-wrap .card { text-align: center; }
+.login-wrap input { width: 100%; margin: 0.5rem 0; }
+.login-wrap button { width: 100%; }
+.warn-banner { font-size: 0.8rem; color: var(--muted); padding: 0.5rem 1.5rem; background: var(--surface-2); border-bottom: 1px solid var(--border); }

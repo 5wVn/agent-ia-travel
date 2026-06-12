@@ -120,6 +120,15 @@ class Config:
     digest_hour: int = 8
     timezone: str = "Europe/Paris"
 
+    # Web dashboard (PLAN.md phase 4, LAN only, same process).
+    # When ``dashboard_password`` is empty/None the dashboard stays disabled.
+    dashboard_password: Optional[str] = None
+    dashboard_port: int = 8080
+    # Secret used to sign the session cookie (HMAC). Defaults to a value derived
+    # from the password when not provided; an explicit value keeps sessions
+    # valid across restarts.
+    dashboard_secret: Optional[str] = None
+
     # Price sniper (PLAN.md step 4bis).
     snipe_interval_minutes: int = 15           # boosted watch cadence
     snipe_proximity_ratio: float = 1.15        # only watch dates < threshold * this
@@ -143,6 +152,20 @@ class Config:
     def llm_enabled(self) -> bool:
         """True only when an Anthropic API key is configured (non-empty)."""
         return bool(self.anthropic_api_key and self.anthropic_api_key.strip())
+
+    def dashboard_enabled(self) -> bool:
+        """True only when a dashboard password is configured (non-empty)."""
+        return bool(self.dashboard_password and self.dashboard_password.strip())
+
+    def dashboard_signing_secret(self) -> str:
+        """HMAC secret for the session cookie.
+
+        Uses ``dashboard_secret`` if set, else derives a stable value from the
+        password so sessions survive a restart without extra config.
+        """
+        if self.dashboard_secret and self.dashboard_secret.strip():
+            return self.dashboard_secret.strip()
+        return f"dashboard-cookie::{self.dashboard_password or ''}"
 
 
 def load_config() -> Config:
@@ -192,6 +215,9 @@ def load_config() -> Config:
     if anthropic_key is not None and not anthropic_key.strip():
         anthropic_key = None
 
+    dashboard_password = os.environ.get("DASHBOARD_PASSWORD") or None
+    dashboard_secret = os.environ.get("DASHBOARD_SECRET") or None
+
     routes = _parse_routes(os.environ.get("ROUTES"))
 
     return Config(
@@ -224,6 +250,9 @@ def load_config() -> Config:
         llm_max_tokens=_get_int("LLM_MAX_TOKENS", 1024),
         digest_hour=_get_int("DIGEST_HOUR", 8),
         timezone=os.environ.get("TIMEZONE", "Europe/Paris"),
+        dashboard_password=dashboard_password,
+        dashboard_port=_get_int("DASHBOARD_PORT", 8080),
+        dashboard_secret=dashboard_secret,
         snipe_interval_minutes=_get_int("SNIPE_INTERVAL_MINUTES", 15),
         snipe_proximity_ratio=_get_float("SNIPE_PROXIMITY_RATIO", 1.15),
         snipe_reping_interval_minutes=_get_int("SNIPE_REPING_INTERVAL_MINUTES", 5),

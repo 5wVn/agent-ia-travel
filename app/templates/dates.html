@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Dates{% endblock %}
+{% block content %}
+<h1>Dates suivies</h1>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0">Ajouter une date</h2>
+  <form method="post" action="/dates/add" class="formgrid">
+    <div class="field">
+      <label>Aller</label>
+      <input type="date" name="depart_date" required>
+    </div>
+    <div class="field">
+      <label>Retour</label>
+      <input type="date" name="return_date">
+    </div>
+    <div class="field">
+      <label>Départ de</label>
+      <select name="depart_time_from">
+        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Départ à</label>
+      <select name="depart_time_to">
+        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Retour de</label>
+      <select name="return_time_from">
+        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Retour à</label>
+      <select name="return_time_to">
+        {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Route</label>
+      <select name="route_id">
+        <option value="">Toutes les routes actives</option>
+        {% for r in routes %}<option value="{{ r.id }}">{{ r.origin }}→{{ r.destination }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit">Ajouter</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th><th>Snipe</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for d in dates %}
+      <tr>
+        <td>
+          {{ d.depart_date }}
+          {% if not d.active %}<span class="badge off">inactive</span>{% endif %}
+        </td>
+        <td>{{ d.return_date or "—" }}</td>
+        <td class="muted">
+          aller {{ (d.depart_time_from ~ "–" ~ d.depart_time_to) if d.depart_time_from else "peu importe" }} ·
+          retour {{ (d.return_time_from ~ "–" ~ d.return_time_to) if d.return_time_from else "peu importe" }}
+        </td>
+        <td>{% if d.route_origin %}{{ d.route_origin }}→{{ d.route_destination }}{% else %}toutes{% endif %}</td>
+        <td>
+          {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
+            <span class="badge armed">{{ "armé" if d.snipe_state == "armed" else "déclenché" }} ≤ {{ "%.0f €"|format(d.snipe_price_eur) }}</span>
+            <form method="post" action="/dates/{{ d.id }}/disarm" class="inline">
+              <button class="ghost" type="submit">Désarmer</button>
+            </form>
+          {% else %}
+            <form method="post" action="/dates/{{ d.id }}/arm" class="inline">
+              <input type="number" name="threshold" min="1" step="1" placeholder="€" style="width:5rem" required>
+              <button type="submit">Armer</button>
+            </form>
+          {% endif %}
+        </td>
+        <td>
+          {% if d.active %}
+          <form method="post" action="/dates/{{ d.id }}/deactivate" class="inline">
+            <button class="ghost" type="submit">Désactiver</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Aucune date suivie.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

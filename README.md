@@ -136,6 +136,36 @@ Alerte critique d'un snipe déclenché :
 - **⏳ Continue à viser** → réarme et stoppe les re-pings.
 - **🔕 Désarmer** → arrête le snipe.
 
+## Dashboard web
+
+Un dashboard web tourne dans **le même conteneur** que le bot (même boucle
+asyncio, même base SQLite et même verrou d'écriture) : Telegram et le dashboard
+écrivent dans la même source de vérité.
+
+- **URL** : `http://IP_DU_NAS:8080` (port configurable via `DASHBOARD_PORT`).
+- **Activation** : définissez `DASHBOARD_PASSWORD` dans `.env`. S'il est absent,
+  le dashboard est **désactivé** (un seul log info au démarrage) et le port ne
+  sert rien.
+- **Connexion** : formulaire de login, session par cookie signé (HMAC). Toutes
+  les pages sont protégées sauf `/login` et `/static`.
+
+⚠️ **LAN uniquement.** Ne faites **pas** de redirection de port internet vers le
+8080. Pour l'accès distant, passez par le **VPN/Tailscale** du NAS.
+
+Pages :
+
+| Page | Contenu |
+|---|---|
+| **Vue d'ensemble** (`/`) | Par route active : meilleur prix, médiane 30 j, graphique d'historique (Chart.js, données de `price_observations`), alertes récentes. |
+| **Destinations** (`/routes`) | Liste des routes, activation/désactivation (suppression logique, jamais de DELETE), ajout origin/destination (codes IATA `[A-Z]{3}`, normalisés en majuscules, doublon refusé). |
+| **Dates** (`/dates`) | Liste des dates suivies (route, fourchettes horaires, état snipe), ajout avec sélecteurs de date aller/retour, fourchettes horaires et choix de route ; désactivation ; armement/désarmement de snipe avec seuil. |
+| **Statut** (`/status`) | Provider actif, quota consommé/restant, dernière collecte, mode LLM, routes actives, snipes armés. |
+
+Les destinations et les dates sont des **données** : la liste de routes vient de
+la table `routes` (semée au premier démarrage depuis la config, dans les deux
+sens TLS⇄ORY/CDG), plus la config de `.env`. Front 100 % server-rendered
+(Jinja2 + htmx + Chart.js **vendorisés** dans `app/static`, zéro CDN, zéro Node).
+
 ## Développement
 
 ```sh

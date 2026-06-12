@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Vue d'ensemble{% endblock %}
+{% block content %}
+<h1>Vue d'ensemble</h1>
+
+{% if not routes %}
+  <div class="card muted">Aucune route active. Ajoutez-en dans <a href="/routes">Destinations</a>.</div>
+{% endif %}
+
+{% for r in routes %}
+<div class="card">
+  <div class="head">
+    <h2 style="margin:0">{{ r.label }}</h2>
+  </div>
+  <div class="metrics">
+    <div class="metric">
+      <div class="v">{{ "%.0f €"|format(r.best) if r.best is not none else "—" }}</div>
+      <div class="k">Meilleur prix</div>
+    </div>
+    <div class="metric">
+      <div class="v">{{ "%.0f €"|format(r.median) if r.median is not none else "—" }}</div>
+      <div class="k">Médiane 30 j</div>
+    </div>
+  </div>
+  {% if r.prices %}
+    <canvas id="chart-{{ r.id }}"
+            data-labels='{{ r.labels|tojson }}'
+            data-prices='{{ r.prices|tojson }}'></canvas>
+  {% else %}
+    <p class="muted">Pas encore d'historique de prix pour cette route.</p>
+  {% endif %}
+</div>
+{% endfor %}
+
+<h2>Alertes récentes</h2>
+<div class="card">
+  {% if alerts %}
+  <table>
+    <thead><tr><th>Date</th><th>Route</th><th>Vol</th><th>Prix</th></tr></thead>
+    <tbody>
+      {% for a in alerts %}
+      <tr>
+        <td>{{ a.sent_at[:16]|replace("T", " ") }}</td>
+        <td>{% if a.origin %}{{ a.origin }}→{{ a.destination }}{% else %}—{% endif %}</td>
+        <td>{{ a.depart_date or "—" }}{% if a.return_date %} → {{ a.return_date }}{% endif %}</td>
+        <td>{{ "%.0f €"|format(a.price_eur) if a.price_eur is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Aucune alerte envoyée pour l'instant.</p>
+  {% endif %}
+</div>
+
+<script>
+window.addEventListener("load", function () {
+  document.querySelectorAll("canvas[data-prices]").forEach(function (cv) {
+    var labels = JSON.parse(cv.dataset.labels);
+    var prices = JSON.parse(cv.dataset.prices);
+    new Chart(cv.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          data: prices,
+          borderColor: "#4c9aff",
+          backgroundColor: "rgba(76,154,255,0.12)",
+          fill: true, tension: 0.25, pointRadius: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { maxTicksLimit: 6 } }, y: { beginAtZero: false } },
+      },
+    });
+  });
+});
+</script>
+{% endblock %}

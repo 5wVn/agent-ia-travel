@@ -22,6 +22,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .analyst import Analyst
 from .bot import TravelBot, format_deal_alert
 from .collector import (
+    active_routes,
     build_snipe_queries,
     quota_allows,
     run_collection,
@@ -38,6 +39,24 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def seed_route_pairs(config: Config) -> list[tuple[str, str]]:
+    """Both-directions seed pairs from the config routes (TLS<->ORY/CDG).
+
+    PLAN.md asks the first start to seed TLS<->ORY and TLS<->CDG in both
+    directions from the existing config. Order-preserving de-duplication keeps
+    the forward route first, then its reverse.
+    """
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for route in config.routes:
+        for o, d in ((route.origin, route.destination), (route.destination, route.origin)):
+            o, d = o.upper(), d.upper()
+            if (o, d) not in seen:
+                seen.add((o, d))
+                pairs.append((o, d))
+    return pairs
 
 
 def _build_deal_context(db: Database, config: Config, deal) -> dict:
@@ -68,7 +87,7 @@ def _build_deal_context(db: Database, config: Config, deal) -> dict:
 def _build_digest_context(db: Database, config: Config) -> dict:
     """Assemble per-route stats and the top 5 deals for the daily digest."""
     routes_ctx = []
-    for route in config.routes:
+    for route in active_routes(config, db):
         cur = db.conn.execute(
             """
             SELECT MIN(price_eur) AS mn, MAX(price_eur) AS mx
@@ -124,12 +143,16 @@ class App:
         self.config = config
         self.db = Database(config.db_path)
         self.db.init_schema()
+        self.db.seed_routes(seed_route_pairs(config))
         self.bot = TravelBot(config, self.db)
         self.analyst = Analyst(config)
         self.scheduler = AsyncIOScheduler(timezone=config.timezone)
         # Cancellable re-ping job ids per triggered snipe (tracked_id -> [ids]).
         self._reping_jobs: dict[int, list[str]] = {}
         self.bot.cancel_repings = self._cancel_repings
+        # Web dashboard task + uvicorn server (None when disabled).
+        self._web_task: Optional[asyncio.Task] = None
+        self._web_server = None
 
     # ----- price sniper orchestration -------------------------------------
 
@@ -185,7 +208,7 @@ class App:
             if not await asyncio.to_thread(quota_allows, self.config, self.db):
                 logger.warning("Quota atteint — snipe tick sans collecte fraîche.")
             else:
-                queries = build_snipe_queries(self.config, candidates)
+                queries = build_snipe_queries(self.config, self.db, candidates)
                 await asyncio.to_thread(
                     run_collection, self.config, self.db, None, queries
                 )
@@ -307,10 +330,39 @@ class App:
             coalesce=True,
         )
 
+    def _start_dashboard(self) -> None:
+        """Start the FastAPI dashboard as a uvicorn task on this loop.
+
+        Uses ``uvicorn.Server(config).serve()`` scheduled as an asyncio task on
+        the bot's loop — never ``uvicorn.run`` (which would spin up its own
+        loop). Disabled (no task) when DASHBOARD_PASSWORD is unset.
+        """
+        from .web import build_dashboard
+
+        app = build_dashboard(self.config, self.db)
+        if app is None:
+            return
+        import uvicorn
+
+        uv_config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=self.config.dashboard_port,
+            log_level="info",
+            lifespan="off",
+        )
+        self._web_server = uvicorn.Server(uv_config)
+        self._web_task = asyncio.create_task(self._web_server.serve())
+        logger.info(
+            "Dashboard web sur http://0.0.0.0:%d (LAN uniquement).",
+            self.config.dashboard_port,
+        )
+
     async def run(self) -> None:
         """Run the bot polling loop with the scheduler attached."""
         self._schedule_jobs()
         self.scheduler.start()
+        self._start_dashboard()
 
         await self.bot.application.initialize()
         await self.bot.application.start()
@@ -330,6 +382,13 @@ class App:
         finally:
             logger.info("Arrêt en cours…")
             self.scheduler.shutdown(wait=False)
+            if self._web_server is not None:
+                self._web_server.should_exit = True
+            if self._web_task is not None:
+                try:
+                    await asyncio.wait_for(self._web_task, timeout=10)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
             await self.bot.application.updater.stop()
             await self.bot.application.stop()
             await self.bot.application.shutdown()

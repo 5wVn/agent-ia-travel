@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS price_observations (
 CREATE INDEX IF NOT EXISTS idx_obs_route_date
     ON price_observations(origin, destination, depart_date, observed_at);
 
+CREATE TABLE IF NOT EXISTS routes (
+    id          INTEGER PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    origin      TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(origin, destination)
+);
+
 CREATE TABLE IF NOT EXISTS tracked_dates (
     id               INTEGER PRIMARY KEY,
     created_at       TEXT NOT NULL,
@@ -116,12 +125,17 @@ class Database:
     def _migrate(self) -> None:
         """Idempotent schema migrations for databases created before a feature.
 
-        Adds the price-sniper columns on ``tracked_dates`` if they are missing.
-        ``ALTER TABLE ... ADD COLUMN`` is only issued when the column is absent,
-        so this is safe to run on every boot and on already-existing databases.
+        Adds the price-sniper columns on ``tracked_dates`` if they are missing,
+        plus the ``route_id`` foreign key linking a tracked date to a route
+        (NULL = all active routes, the historical behaviour). ``ALTER TABLE ...
+        ADD COLUMN`` is only issued when the column is absent, so this is safe to
+        run on every boot and on already-existing databases.
         """
         self._add_column_if_missing("tracked_dates", "snipe_price_eur", "REAL")
         self._add_column_if_missing("tracked_dates", "snipe_state", "TEXT")
+        self._add_column_if_missing(
+            "tracked_dates", "route_id", "INTEGER REFERENCES routes(id)"
+        )
 
     def _column_names(self, table: str) -> set[str]:
         cur = self.conn.execute(f"PRAGMA table_info({table})")
@@ -137,6 +151,84 @@ class Database:
 
     def close(self) -> None:
         self.conn.close()
+
+    # ----- routes (destinations as data, PLAN.md section 3) ---------------
+
+    def seed_routes(self, routes: list[tuple[str, str]]) -> None:
+        """Seed the ``routes`` table once, on the very first start.
+
+        Idempotent and seed-once: if *any* row already exists in ``routes``
+        (even if all are inactive), nothing is inserted, so a route the user
+        deactivated from the dashboard is never silently resurrected. The given
+        pairs are inserted both directions are expected to be passed explicitly
+        by the caller (config seeds TLS<->ORY/CDG both ways).
+        """
+        with self._write_lock:
+            cur = self.conn.cursor()
+            try:
+                existing = cur.execute(
+                    "SELECT COUNT(*) AS n FROM routes"
+                ).fetchone()
+                if existing and int(existing["n"]) > 0:
+                    return
+                now = _now()
+                for origin, destination in routes:
+                    cur.execute(
+                        """
+                        INSERT OR IGNORE INTO routes
+                            (created_at, origin, destination, active)
+                        VALUES (?, ?, ?, 1)
+                        """,
+                        (now, origin.upper(), destination.upper()),
+                    )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+    def active_routes(self) -> list[sqlite3.Row]:
+        cur = self.conn.execute(
+            "SELECT * FROM routes WHERE active = 1 ORDER BY origin, destination"
+        )
+        return cur.fetchall()
+
+    def all_routes(self) -> list[sqlite3.Row]:
+        cur = self.conn.execute(
+            "SELECT * FROM routes ORDER BY active DESC, origin, destination"
+        )
+        return cur.fetchall()
+
+    def get_route(self, route_id: int) -> Optional[sqlite3.Row]:
+        cur = self.conn.execute("SELECT * FROM routes WHERE id = ?", (route_id,))
+        return cur.fetchone()
+
+    def add_route(self, origin: str, destination: str) -> int:
+        """Insert a new active route (origin/destination IATA codes).
+
+        Caller is responsible for format validation; here we normalize to upper
+        case. Raises ``sqlite3.IntegrityError`` on a duplicate (UNIQUE), which
+        the web layer turns into a user-facing "doublon" message.
+        """
+        with self._write() as cur:
+            cur.execute(
+                """
+                INSERT INTO routes (created_at, origin, destination, active)
+                VALUES (?, ?, ?, 1)
+                """,
+                (_now(), origin.upper(), destination.upper()),
+            )
+            return int(cur.lastrowid)
+
+    def set_route_active(self, route_id: int, active: bool) -> None:
+        """Logical (de)activation — never a physical DELETE (observations refer
+        to a route's origin/destination historically)."""
+        with self._write() as cur:
+            cur.execute(
+                "UPDATE routes SET active = ? WHERE id = ?",
+                (1 if active else 0, route_id),
+            )
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Cursor]:
@@ -299,14 +391,18 @@ class Database:
         depart_time_to: Optional[str] = None,
         return_time_from: Optional[str] = None,
         return_time_to: Optional[str] = None,
+        route_id: Optional[int] = None,
     ) -> int:
+        """Insert a tracked date. ``route_id`` NULL = all active routes (the
+        historical behaviour preserved for Telegram /track)."""
         with self._write() as cur:
             cur.execute(
                 """
                 INSERT INTO tracked_dates
                     (created_at, depart_date, return_date, depart_time_from,
-                     depart_time_to, return_time_from, return_time_to, active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                     depart_time_to, return_time_from, return_time_to, active,
+                     route_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
                 (
                     _now(),
@@ -316,6 +412,7 @@ class Database:
                     depart_time_to,
                     return_time_from,
                     return_time_to,
+                    route_id,
                 ),
             )
             return int(cur.lastrowid)
@@ -329,6 +426,19 @@ class Database:
     def all_tracked_dates(self) -> list[sqlite3.Row]:
         cur = self.conn.execute(
             "SELECT * FROM tracked_dates ORDER BY active DESC, depart_date"
+        )
+        return cur.fetchall()
+
+    def all_tracked_dates_with_routes(self) -> list[sqlite3.Row]:
+        """Tracked dates joined with their route label (NULL route_id = all
+        active routes). Used by the dashboard /dates page."""
+        cur = self.conn.execute(
+            """
+            SELECT t.*, r.origin AS route_origin, r.destination AS route_destination
+            FROM tracked_dates t
+            LEFT JOIN routes r ON r.id = t.route_id
+            ORDER BY t.active DESC, t.depart_date
+            """
         )
         return cur.fetchall()
 
@@ -533,6 +643,84 @@ class Database:
         )
         row = cur.fetchone()
         return row["ts"] if row and row["ts"] else None
+
+    # ----- dashboard read helpers ----------------------------------------
+
+    def route_best_price(self, origin: str, destination: str) -> Optional[float]:
+        """Cheapest observed price for a route, or None when no history."""
+        cur = self.conn.execute(
+            """
+            SELECT MIN(price_eur) AS mn FROM price_observations
+            WHERE origin = ? AND destination = ?
+            """,
+            (origin, destination),
+        )
+        row = cur.fetchone()
+        return float(row["mn"]) if row and row["mn"] is not None else None
+
+    def route_median(
+        self,
+        origin: str,
+        destination: str,
+        window_days: int = 30,
+        now: Optional[datetime] = None,
+    ) -> Optional[float]:
+        """Median price for a whole route over the rolling window, or None."""
+        if now is None:
+            now = datetime.now(timezone.utc)
+        cutoff = datetime.fromtimestamp(
+            now.timestamp() - window_days * 86400, tz=timezone.utc
+        ).isoformat()
+        cur = self.conn.execute(
+            """
+            SELECT price_eur FROM price_observations
+            WHERE origin = ? AND destination = ? AND observed_at >= ?
+            """,
+            (origin, destination, cutoff),
+        )
+        prices = [float(r["price_eur"]) for r in cur.fetchall()]
+        return _median(prices) if prices else None
+
+    def route_price_history(
+        self,
+        origin: str,
+        destination: str,
+        limit: int = 100,
+    ) -> list[tuple[str, float]]:
+        """Cheapest price per collection day for a route (oldest first).
+
+        Returns ``(date, price)`` points suitable for a Chart.js sparkline. We
+        bucket by the observation day so the line stays readable rather than
+        plotting every raw offer.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT substr(observed_at, 1, 10) AS day, MIN(price_eur) AS price
+            FROM price_observations
+            WHERE origin = ? AND destination = ?
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT ?
+            """,
+            (origin, destination, limit),
+        )
+        rows = cur.fetchall()
+        return [(r["day"], float(r["price"])) for r in reversed(rows)]
+
+    def recent_alerts(self, limit: int = 10) -> list[sqlite3.Row]:
+        """Most recent sent alerts joined with their observation, newest first."""
+        cur = self.conn.execute(
+            """
+            SELECT a.sent_at, o.origin, o.destination, o.depart_date,
+                   o.return_date, o.price_eur
+            FROM alerts_sent a
+            LEFT JOIN price_observations o ON o.id = a.observation_id
+            ORDER BY a.sent_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return cur.fetchall()
 
     def best_current_price(
         self, depart_date: str, return_date: Optional[str]

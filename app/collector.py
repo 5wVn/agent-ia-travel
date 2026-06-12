@@ -19,8 +19,19 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from .config import Config, upcoming_weekends
+from .config import Config, Route, upcoming_weekends
 from .db import Database
+
+
+def active_routes(config: Config, db: Database) -> list[Route]:
+    """The routes the pipeline iterates over: active rows in the ``routes``
+    table (the destinations-as-data source of truth). Falls back to the config
+    routes only when the table is empty (e.g. a brand-new db not yet seeded),
+    so collection never silently does nothing."""
+    rows = db.active_routes()
+    if rows:
+        return [Route(r["origin"], r["destination"]) for r in rows]
+    return list(config.routes)
 from .providers import (
     FlightProvider,
     NormalizedOffer,
@@ -45,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AMADEUS_BASE_URL",
+    "active_routes",
     "AmadeusClient",
     "FlightProvider",
     "NormalizedOffer",
@@ -77,7 +89,7 @@ def build_queries(config: Config, db: Database) -> list[SearchQuery]:
 
     seen: set[tuple[str, str, Optional[str]]] = set()
     queries: list[SearchQuery] = []
-    for route in config.routes:
+    for route in active_routes(config, db):
         for depart, ret in pairs:
             key = (route.label(), depart, ret)
             if key in seen:
@@ -87,15 +99,18 @@ def build_queries(config: Config, db: Database) -> list[SearchQuery]:
     return queries
 
 
-def build_snipe_queries(config: Config, rows: list[Any]) -> list[SearchQuery]:
+def build_snipe_queries(
+    config: Config, db: Database, rows: list[Any]
+) -> list[SearchQuery]:
     """Build searches for a given set of snipe-candidate tracked-date rows.
 
-    Each (depart, return) pair is searched on every configured route, with the
-    same per-route de-duplication as :func:`build_queries`.
+    Each (depart, return) pair is searched on every active route (from the
+    ``routes`` table), with the same per-route de-duplication as
+    :func:`build_queries`.
     """
     seen: set[tuple[str, str, Optional[str]]] = set()
     queries: list[SearchQuery] = []
-    for route in config.routes:
+    for route in active_routes(config, db):
         for row in rows:
             depart, ret = row["depart_date"], row["return_date"]
             key = (route.label(), depart, ret)
@@ -140,7 +155,7 @@ def standard_scan_should_defer(
     ceiling = int(config.provider_monthly_quota() * config.quota_safety_ratio)
     # Budget the sniper needs before the next standard scan: one boosted-watch
     # pass per candidate, across every route.
-    reserve = snipe_candidate_count * max(1, len(config.routes))
+    reserve = snipe_candidate_count * max(1, len(active_routes(config, db)))
     return used + reserve >= ceiling
 
 

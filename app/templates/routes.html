@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Destinations{% endblock %}
+{% block content %}
+<h1>Destinations</h1>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0">Ajouter une route</h2>
+  <form method="post" action="/routes/add" class="formgrid">
+    <div class="field">
+      <label>Origine (IATA)</label>
+      <input name="origin" maxlength="3" placeholder="TLS" pattern="[A-Za-z]{3}" required style="text-transform:uppercase">
+    </div>
+    <div class="field">
+      <label>Destination (IATA)</label>
+      <input name="destination" maxlength="3" placeholder="ORY" pattern="[A-Za-z]{3}" required style="text-transform:uppercase">
+    </div>
+    <button type="submit">Ajouter</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>Route</th><th>État</th><th></th></tr></thead>
+    <tbody>
+      {% for r in routes %}
+      <tr>
+        <td>{{ r.origin }} → {{ r.destination }}</td>
+        <td>
+          {% if r.active %}<span class="badge on">active</span>
+          {% else %}<span class="badge off">inactive</span>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="/routes/{{ r.id }}/toggle" class="inline">
+            <button class="ghost" type="submit">{{ "Désactiver" if r.active else "Réactiver" }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">Aucune route.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
