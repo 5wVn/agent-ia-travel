@@ -75,6 +75,19 @@ CREATE TABLE price_observations (
 );
 CREATE INDEX idx_obs_route_date ON price_observations(origin, destination, depart_date, observed_at);
 
+-- Dates suivies, ajoutées via le calendrier Telegram (/track)
+CREATE TABLE tracked_dates (
+    id               INTEGER PRIMARY KEY,
+    created_at       TEXT NOT NULL,
+    depart_date      TEXT NOT NULL,
+    return_date      TEXT,
+    depart_time_from TEXT,                -- 'HH:MM', NULL = peu importe
+    depart_time_to   TEXT,
+    return_time_from TEXT,
+    return_time_to   TEXT,
+    active           INTEGER NOT NULL DEFAULT 1   -- 0 = mis en pause via /untrack
+);
+
 -- Décisions utilisateur (réponses Telegram) : la mémoire de l'agent
 CREATE TABLE decisions (
     id            INTEGER PRIMARY KEY,
@@ -100,7 +113,7 @@ Tout dérive de `price_observations` : la baseline (médiane 30 jours par route/
 ## 4. Pipeline détaillé
 
 ### Étape 1 — Collecte (toutes les 4h, configurable)
-- Fenêtre de recherche configurable : ex. les **8 prochains week-ends** (vendredi→dimanche) + dates fixes que tu ajoutes via Telegram (`/track 2026-07-14 2026-07-18`).
+- Fenêtre de recherche configurable : ex. les **8 prochains week-ends** (vendredi→dimanche) + les dates de la table `tracked_dates`, ajoutées via le calendrier interactif Telegram (`/track`, voir plus bas).
 - 1 appel Amadeus par couple (date_aller, date_retour) × 2 aéroports parisiens → budget quota maîtrisé (~16 combinaisons × 6 collectes/jour = vérifier le quota du tier gratuit, sinon passer à 2 collectes/jour).
 - Normalisation → insertion en base. Erreurs API = retry exponentiel (3 tentatives), puis log et on attend le prochain tick — jamais de crash.
 
@@ -134,6 +147,23 @@ client.messages.create(
 
 ### Étape 5 — Digest quotidien (8h)
 Un message Telegram : min/max/médiane par route, meilleures dates du moment, deals en attente. Rédigé par le LLM (1 appel/jour).
+
+### Sélection des dates et horaires — calendrier interactif Telegram
+
+Le suivi de dates se pilote entièrement depuis Telegram via des **claviers inline** (boutons éditables en place dans le message). Aucun impact réseau : les clics arrivent en `callback_query` via le même long polling sortant.
+
+**Flux `/track` :**
+
+1. **Calendrier aller** — grille des jours du mois avec navigation `◀ mois ▶` (lib `python-telegram-bot-calendar` ou clavier custom). Mode multi-sélection possible (jours cochés ✓ + bouton Valider) pour suivre plusieurs dates d'un coup.
+2. **Fourchette horaire aller** — grille d'heures (06h–22h) : un clic pour le début, un pour la fin (heures antérieures grisées), ou bouton `[Peu importe]`.
+3. **Calendrier retour** (jours avant l'aller grisés) puis **fourchette horaire retour**.
+4. Confirmation : `✅ Suivi : 14/06 (départ 17h–21h) → 18/06 (retour 16h–20h)` → insertion dans `tracked_dates`.
+
+**Filtrage horaire** : appliqué **localement** après l'appel Amadeus (l'API renvoie toutes les offres du jour avec horaires) — zéro appel API supplémentaire. Les vols hors fourchette sont quand même insérés en base (stats/baseline) mais n'émettent pas d'alerte.
+
+**Commandes associées :** `/untrack` réaffiche les dates suivies pour en désactiver (`active = 0`), `/status` liste les suivis en cours avec le meilleur prix actuel de chacun.
+
+Limite Telegram : ~100 boutons par clavier — un mois complet (31 jours + navigation) passe sans problème.
 
 ---
 
@@ -202,7 +232,7 @@ agent-ia-travel/
 
 1. **Phase 1 — Boucle minimale** : collector Amadeus → SQLite → alerte Telegram sur seuil absolu. *Déjà utile sans LLM.*
 2. **Phase 2 — Intelligence** : médiane glissante, anti-spam, analyse + reco Claude, boutons de confirmation, table `decisions`.
-3. **Phase 3 — Confort** : digest quotidien, commandes Telegram (`/track`, `/status`, `/pause`), mémoire des préférences (heures de vol préférées, compagnies à éviter).
+3. **Phase 3 — Confort** : digest quotidien, calendrier interactif `/track` (sélection des jours + fourchettes horaires), `/untrack`, `/status`, `/pause`, mémoire des préférences (heures de vol préférées, compagnies à éviter).
 4. **Phase 4 — Optionnel** : 2e source de prix (Travelpayouts) pour croiser, comparaison TGV (API SNCF) sur le même trajet, petit dashboard (Grafana/Streamlit) branché sur SQLite.
 
 ---
