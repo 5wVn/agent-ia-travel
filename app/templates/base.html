@@ -8,12 +8,22 @@
   <title>{% block title %}Dashboard{% endblock %} · Agent Travel</title>
   <link rel="preload" href="/static/fonts/manrope.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Agent Travel">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/chart.min.js" defer></script>
   <script src="/static/charts.js" defer></script>
 </head>
 <body>
   {% block chrome %}
+  <header class="mobile-head">
+    <span class="brand">AGENT <span>TRAVEL</span></span>
+  </header>
   <div class="shell">
     <aside class="sidebar">
       <span class="brand">AGENT <span>TRAVEL</span></span>
@@ -49,6 +59,24 @@
       </main>
     </div>
   </div>
+  <nav class="tabbar" aria-label="Navigation principale">
+    <a href="/" class="{{ 'active' if active == 'overview' else '' }}">
+      <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg>
+      <span>Vue</span>
+    </a>
+    <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}">
+      <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 5l4-2 4 2 4-2v8l-4 2-4-2-4 2V5z"/><path d="M6 3v8M10 5v8"/></svg>
+      <span>Destinations</span>
+    </a>
+    <a href="/dates" class="{{ 'active' if active == 'dates' else '' }}">
+      <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg>
+      <span>Dates</span>
+    </a>
+    <a href="/status" class="{{ 'active' if active == 'status' else '' }}">
+      <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M13 3l-1.4 1.4M4.4 11.6L3 13"/></svg>
+      <span>Statut</span>
+    </a>
+  </nav>
   {% endblock %}
 </body>
 </html>

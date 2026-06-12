@@ -166,6 +166,13 @@ la table `routes` (semée au premier démarrage depuis la config, dans les deux
 sens TLS⇄ORY/CDG), plus la config de `.env`. Front 100 % server-rendered
 (Jinja2 + htmx + Chart.js **vendorisés** dans `app/static`, zéro CDN, zéro Node).
 
+**Sur mobile (≤ 720px)** le dashboard adopte une navigation par barre d'onglets
+en bas et des listes denses ; au-dessus de 720px, l'interface desktop est
+inchangée. Il est **installable sur l'écran d'accueil** (PWA, `manifest.webmanifest`
++ icônes générées par `scripts/gen_icons.py`) : sur iPhone, ouvrez le dashboard
+dans Safari puis **Partager → Sur l'écran d'accueil** (sur Android : menu Chrome →
+**Ajouter à l'écran d'accueil**).
+
 ## Développement
 
 ```sh

@@ -56,10 +56,28 @@
       </tbody>
     </table>
   </div>
+  <div class="m-list">
+    {% for s in armed_snipes %}
+    <div class="m-row">
+      <span class="l1">
+        <span class="route-cell">{{ s.depart_date|fr_date }}{% if s.return_date %} → {{ s.return_date|fr_date }}{% endif %}</span>
+        <span class="price">≤ {{ s.snipe_price_eur|eur }}</span>
+      </span>
+      <span class="l2">
+        <span class="badge armed">{{ "armé" if s.snipe_state == "armed" else "déclenché" }}</span>
+      </span>
+    </div>
+    {% endfor %}
+  </div>
   {% else %}
   <div class="empty">
     <p>Aucun snipe armé. Armez un seuil depuis la page Dates pour être alerté sous un prix cible.</p>
   </div>
   {% endif %}
 </div>
+
+<a class="m-logout m-only" href="/logout">
+  <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><path d="M10 11l3-3-3-3M13 8H6"/></svg>
+  Déconnexion
+</a>
 {% endblock %}

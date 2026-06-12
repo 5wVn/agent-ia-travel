@@ -273,6 +273,20 @@ def build_dashboard(config: Config, db: Database) -> Optional[FastAPI]:
     app = FastAPI(title="Agent IA Travel — Dashboard", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    # PWA manifest : servi par une route dédiée pour garantir le bon
+    # content-type (``application/manifest+json``) — le module mimetypes ne
+    # connaît pas toujours ``.webmanifest``, et certains navigateurs refusent
+    # un manifest servi en ``application/octet-stream``. Public (pas d'auth) :
+    # un manifest ne révèle aucune donnée.
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    async def manifest() -> Response:
+        path = STATIC_DIR / "manifest.webmanifest"
+        return Response(
+            content=path.read_bytes(),
+            media_type="application/manifest+json",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     def authed(request: Request) -> bool:
         return verify_session_token(secret, request.cookies.get(SESSION_COOKIE, ""))
 

@@ -160,21 +160,35 @@
     });
   }
 
+  // Sélecteur commun aux deux rendus de la liste des routes : le tableau dense
+  // desktop (#routes-table tr.route-row) et la liste mobile (.route-row dans
+  // #routes-mlist). Les deux portent les mêmes data-* et un data-route-id, ce
+  // qui permet de synchroniser la sélection d'un rendu à l'autre.
+  function allRows() {
+    return document.querySelectorAll(
+      "#routes-table tr.route-row, #routes-mlist .route-row"
+    );
+  }
+
   function select(row) {
-    var rows = document.querySelectorAll("#routes-table tr.route-row");
-    rows.forEach(function (el) { el.classList.remove("selected"); });
-    row.classList.add("selected");
+    var rid = row.dataset.routeId;
+    allRows().forEach(function (el) {
+      el.classList.toggle("selected", el.dataset.routeId === rid);
+    });
     show(row);
   }
 
   function init() {
     if (typeof Chart === "undefined") return;
-    var rows = document.querySelectorAll("#routes-table tr.route-row");
+    var rows = allRows();
     if (!rows.length) return;
     rows.forEach(function (row) {
       row.addEventListener("click", function () { select(row); });
     });
-    var selected = document.querySelector("#routes-table tr.route-row.selected") || rows[0];
+    var selected =
+      document.querySelector(
+        "#routes-table tr.route-row.selected, #routes-mlist .route-row.selected"
+      ) || rows[0];
     show(selected);
   }
 

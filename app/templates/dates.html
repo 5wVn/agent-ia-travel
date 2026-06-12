@@ -4,6 +4,58 @@
 <h1>Dates suivies</h1>
 {% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
+{% macro date_fields() %}
+  <div class="field">
+    <label>Aller</label>
+    <input type="date" name="depart_date" required>
+  </div>
+  <div class="field">
+    <label>Retour</label>
+    <input type="date" name="return_date">
+  </div>
+  <div class="field">
+    <label>Départ de</label>
+    <select name="depart_time_from">
+      {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label>Départ à</label>
+    <select name="depart_time_to">
+      {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label>Retour de</label>
+    <select name="return_time_from">
+      {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label>Retour à</label>
+    <select name="return_time_to">
+      {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label>Route</label>
+    <select name="route_id">
+      <option value="">Toutes les routes actives</option>
+      {% for r in routes %}<option value="{{ r.id }}">{{ r.origin }}→{{ r.destination }}</option>{% endfor %}
+    </select>
+  </div>
+{% endmacro %}
+
+<details class="m-add m-only">
+  <summary>Ajouter une date</summary>
+  <div class="m-add-body">
+    <form method="post" action="/dates/add">
+      {{ date_fields() }}
+      <button type="submit">Ajouter</button>
+    </form>
+  </div>
+</details>
+
 <div class="dates-grid">
   <div class="panel">
     {% if dates %}
@@ -62,6 +114,52 @@
         </tbody>
       </table>
     </div>
+    <div class="m-list">
+      {% for item in dates %}
+      {% set d = item.row %}
+      <div class="m-row">
+        <span class="l1">
+          <span class="route-cell">
+            {{ d.depart_date|fr_date }}{% if d.return_date %} → {{ d.return_date|fr_date }}{% endif %}
+          </span>
+          {% if item.best is not none %}
+            <span class="price">{{ item.best|eur }}</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </span>
+        <span class="l2">
+          <span>{% if d.route_origin %}{{ d.route_origin }}→{{ d.route_destination }}{% else %}toutes routes{% endif %}</span>
+          {% if item.best_stops %}<span>{{ item.best_stops }}</span>{% endif %}
+          {% if not d.active %}<span class="badge off">inactive</span>{% endif %}
+          {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
+            <span class="badge armed">{{ "armé" if d.snipe_state == "armed" else "déclenché" }} ≤ {{ d.snipe_price_eur|eur }}</span>
+          {% endif %}
+        </span>
+        <span class="l2 sub">
+          aller {{ d.depart_time_from|fr_timerange(d.depart_time_to) }} · retour {{ d.return_time_from|fr_timerange(d.return_time_to) }}
+        </span>
+        <div class="m-actions">
+          {% if d.snipe_state in ("armed", "triggered") and d.snipe_price_eur is not none %}
+            <form method="post" action="/dates/{{ d.id }}/disarm" class="inline">
+              <button class="ghost" type="submit">Désarmer</button>
+            </form>
+          {% else %}
+            <form method="post" action="/dates/{{ d.id }}/arm" class="inline">
+              <input type="number" name="threshold" min="1" step="1" placeholder="€ seuil" style="width:6rem" required>
+              <button type="submit">Armer</button>
+            </form>
+          {% endif %}
+          {% if d.active %}
+          <form method="post" action="/dates/{{ d.id }}/deactivate" class="inline"
+                onsubmit="return confirm('Désactiver cette date suivie ?');">
+            <button class="ghost" type="submit">Désactiver</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
     {% else %}
     <div class="empty">
       <div class="title">Aucune date suivie</div>
@@ -70,49 +168,11 @@
     {% endif %}
   </div>
 
-  <aside class="panel add-panel">
+  <aside class="panel add-panel m-hide">
     <div class="panel-head"><h2>Ajouter une date</h2></div>
     <div class="panel-body">
       <form method="post" action="/dates/add">
-        <div class="field">
-          <label>Aller</label>
-          <input type="date" name="depart_date" required>
-        </div>
-        <div class="field">
-          <label>Retour</label>
-          <input type="date" name="return_date">
-        </div>
-        <div class="field">
-          <label>Départ de</label>
-          <select name="depart_time_from">
-            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>Départ à</label>
-          <select name="depart_time_to">
-            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>Retour de</label>
-          <select name="return_time_from">
-            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>Retour à</label>
-          <select name="return_time_to">
-            {% for t in time_choices %}<option value="{{ t }}">{{ t or "peu importe" }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>Route</label>
-          <select name="route_id">
-            <option value="">Toutes les routes actives</option>
-            {% for r in routes %}<option value="{{ r.id }}">{{ r.origin }}→{{ r.destination }}</option>{% endfor %}
-          </select>
-        </div>
+        {{ date_fields() }}
         <button type="submit">Ajouter</button>
       </form>
     </div>

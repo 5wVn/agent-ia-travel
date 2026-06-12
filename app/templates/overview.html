@@ -76,6 +76,42 @@
         </tbody>
       </table>
     </div>
+    <div class="m-list" id="routes-mlist">
+      {% for r in routes %}
+      <button type="button" class="m-row route-row{{ ' selected' if loop.first else '' }}"
+              data-route-id="{{ r.id }}"
+              data-label="{{ r.label }}"
+              data-labels='{{ r.labels|tojson }}'
+              data-prices='{{ r.prices|tojson }}'
+              data-median='{{ r.median if r.median is not none else "" }}'
+              data-snipe='{{ r.snipe_threshold if r.snipe_threshold is not none else "" }}'>
+        <span class="l1">
+          <span class="route-cell">{{ r.label }}</span>
+          {% if r.best is not none %}
+            <span class="price {{ r.situation }}">{{ r.best|eur }}</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </span>
+        <span class="l2">
+          {% if r.delta is not none %}
+            <span class="delta {{ 'good' if r.delta < 0 else ('high' if r.delta > 0 else '') }}">
+              {{ '+' if r.delta > 0 else '' }}{{ r.delta|round(0)|int|eur }}<span class="pct">{{ '+' if r.delta_pct > 0 else '' }}{{ r.delta_pct|round(0)|int }} %</span>
+            </span>
+          {% endif %}
+          {% if r.trend.dir == "down" %}
+            <span class="trend down"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 4l4.5 5L11 4"/></svg>{{ r.trend.delta|round(0)|int|abs|eur }}</span>
+          {% elif r.trend.dir == "up" %}
+            <span class="trend up"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 9l4.5-5L11 9"/></svg>{{ r.trend.delta|round(0)|int|abs|eur }}</span>
+          {% else %}
+            <span class="trend flat">stable</span>
+          {% endif %}
+          {% if r.best_stops %}<span>{{ r.best_stops }}</span>{% endif %}
+          {% if r.snipe_threshold is not none %}<span class="badge armed">≤ {{ r.snipe_threshold|eur }}</span>{% endif %}
+        </span>
+      </button>
+      {% endfor %}
+    </div>
   </div>
 
   <div class="panel chart-panel" id="chart-panel">
@@ -107,6 +143,20 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="m-list">
+    {% for a in alerts %}
+    <div class="m-row">
+      <span class="l1">
+        <span class="route-cell">{% if a.origin %}{{ a.origin }}→{{ a.destination }}{% else %}—{% endif %}</span>
+        <span class="price">{{ a.price_eur|eur }}</span>
+      </span>
+      <span class="l2">
+        <span>{{ a.sent_at|fr_datetime }}</span>
+        <span>{{ a.depart_date|fr_date }}{% if a.return_date %} → {{ a.return_date|fr_date }}{% endif %}</span>
+      </span>
+    </div>
+    {% endfor %}
   </div>
   {% else %}
   <div class="empty">

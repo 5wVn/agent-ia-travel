@@ -4,21 +4,35 @@
 <h1>Destinations</h1>
 {% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
-<div class="panel">
+{% macro route_fields() %}
+  <div class="field">
+    <label>Origine (IATA)</label>
+    <input name="origin" maxlength="3" placeholder="TLS" pattern="[A-Za-z]{3}" required
+           autocapitalize="characters" style="text-transform:uppercase">
+  </div>
+  <div class="field">
+    <label>Destination (IATA)</label>
+    <input name="destination" maxlength="3" placeholder="ORY" pattern="[A-Za-z]{3}" required
+           autocapitalize="characters" style="text-transform:uppercase">
+  </div>
+{% endmacro %}
+
+<div class="panel m-hide">
   <form method="post" action="/routes/add" class="form-row">
-    <div class="field">
-      <label>Origine (IATA)</label>
-      <input name="origin" maxlength="3" placeholder="TLS" pattern="[A-Za-z]{3}" required
-             autocapitalize="characters" style="text-transform:uppercase">
-    </div>
-    <div class="field">
-      <label>Destination (IATA)</label>
-      <input name="destination" maxlength="3" placeholder="ORY" pattern="[A-Za-z]{3}" required
-             autocapitalize="characters" style="text-transform:uppercase">
-    </div>
+    {{ route_fields() }}
     <button type="submit">Ajouter la route</button>
   </form>
 </div>
+
+<details class="m-add m-only">
+  <summary>Ajouter une route</summary>
+  <div class="m-add-body">
+    <form method="post" action="/routes/add">
+      {{ route_fields() }}
+      <button type="submit">Ajouter la route</button>
+    </form>
+  </div>
+</details>
 
 <div class="panel">
   {% if routes %}
@@ -43,6 +57,23 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="m-list">
+    {% for r in routes %}
+    <div class="m-row">
+      <span class="l1">
+        <span class="route-cell">{{ r.origin }} → {{ r.destination }}</span>
+        {% if r.active %}<span class="badge on">active</span>
+        {% else %}<span class="badge off">inactive</span>{% endif %}
+      </span>
+      <div class="m-actions">
+        <form method="post" action="/routes/{{ r.id }}/toggle" class="inline"
+              {% if r.active %}onsubmit="return confirm('Désactiver la route {{ r.origin }}→{{ r.destination }} ?');"{% endif %}>
+          <button class="ghost" type="submit">{{ "Désactiver" if r.active else "Réactiver" }}</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
   </div>
   {% else %}
   <div class="empty">

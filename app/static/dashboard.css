@@ -460,31 +460,252 @@ button.ghost:hover { background: var(--surface-2); }
   .gauge .fill { transition: none; }
 }
 
-/* ---------- mobile : sidebar -> horizontal bar, tables scroll ---------- */
-@media (max-width: 860px) {
-  .shell { flex-direction: column; }
-  .sidebar {
-    position: sticky;
-    width: 100%;
-    flex-direction: row;
+/* =====================================================================
+   MOBILE (≤ 720px) — même langage visuel, refonte de la navigation et des
+   tables en listes denses bord à bord. Au-dessus de 720px : RIEN ne change
+   (direction desktop validée client). Tout le mobile vit donc sous cette
+   media query, et les éléments mobiles (mobile-head, tabbar, .m-list) sont
+   masqués par défaut sur desktop juste en dessous.
+   ===================================================================== */
+
+/* éléments propres au mobile : invisibles sur desktop */
+.mobile-head { display: none; }
+.tabbar { display: none; }
+.m-list { display: none; }
+.m-only { display: none; }
+
+@media (max-width: 720px) {
+  /* --- chrome : sidebar masquée, en-tête mince + tab bar fixe --- */
+  .sidebar { display: none; }
+  .content { margin-left: 0; }
+  .shell { display: block; min-height: 0; }
+
+  .mobile-head {
+    display: flex;
     align-items: center;
-    bottom: auto;
-    border-right: none;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: 48px;
+    padding: 0 1rem;
+    padding-top: env(safe-area-inset-top, 0);
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
   }
-  .sidebar .brand {
-    border-bottom: none;
-    border-right: 1px solid var(--border);
-    padding: 0.85rem 1rem;
+  .mobile-head .brand {
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .mobile-head .brand span { color: var(--accent); }
+
+  /* tab bar fixe en bas, 4 cibles ≥ 48px, safe-area iPhone */
+  .tabbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 30;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .tabbar a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.18rem;
+    min-height: 52px;
+    padding: 0.4rem 0.25rem;
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .tabbar a .ico { width: 20px; height: 20px; flex: none; }
+  .tabbar a.active { color: var(--accent); }
+  .tabbar a.active .ico { color: var(--accent); }
+
+  /* l'avertissement LAN reste, mais discret */
+  .warn-banner { padding: 0.45rem 1rem; font-size: 0.72rem; }
+
+  /* main : place pour la tab bar (hauteur + safe-area) */
+  main {
+    padding: 0.9rem 0.9rem 0;
+    margin-bottom: calc(64px + env(safe-area-inset-bottom, 0));
+  }
+
+  /* sticky header de page */
+  h1 {
+    position: sticky;
+    top: calc(48px + env(safe-area-inset-top, 0));
+    z-index: 10;
+    margin: 0 -0.9rem 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.95rem;
+  }
+  h2 { margin: 1.1rem 0 0.5rem; }
+
+  /* --- tables -> listes : on masque le tableau, on montre la liste --- */
+  .table-wrap { display: none; }
+  .m-list { display: block; }
+
+  /* les grilles desktop s'empilent naturellement */
+  .overview-grid,
+  .dates-grid,
+  .status-grid { display: block; }
+  .overview-grid > * + *,
+  .status-grid > * + * { margin-top: 1rem; }
+
+  /* panneaux : pas d'ombre flottante, bord à bord avec l'écran */
+  .panel {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: none;
+    margin: 0 -0.9rem 1rem;
+  }
+  .panel .panel-head { padding: 0.6rem 0.9rem; }
+
+  /* --- rangée de liste dense (2 lignes) bord à bord --- */
+  .m-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0.65rem 0.9rem;
+    color: var(--text);
+    font: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-list .m-row:last-child { border-bottom: none; }
+  button.m-row { cursor: pointer; }
+  button.m-row.selected { background: var(--accent-soft); }
+
+  .m-row .l1 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+  }
+  .m-row .l1 .route-cell {
+    font-weight: 700;
+    letter-spacing: 0.01em;
     white-space: nowrap;
   }
-  .sidebar nav { flex-direction: row; padding: 0.4rem; flex: 1; gap: 0.1rem; }
-  .sidebar nav a { white-space: nowrap; padding: 0.5rem 0.7rem; }
-  .sidebar nav a .ico { display: none; }
-  .sidebar .foot { border-top: none; border-left: 1px solid var(--border); padding: 0.4rem; }
-  .sidebar .foot a .ico { display: none; }
-  .content { margin-left: 0; }
-  main { padding: 1rem 1rem 2rem; }
-  .warn-banner { padding: 0.45rem 1rem; }
+  .m-row .l1 .price {
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .m-row .l1 .price.good { color: var(--good); }
+  .m-row .l1 .price.high { color: var(--bad); }
+
+  .m-row .l2 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+    font-size: 0.76rem;
+    color: var(--muted);
+  }
+  .m-row .l2 .trend svg { width: 12px; height: 12px; }
+  .m-row .l2 .delta { font-size: 0.78rem; }
+
+  /* rangée d'actions (dates / destinations) */
+  .m-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+  .m-actions form.inline { display: inline-flex; gap: 0.35rem; }
+  .m-actions input { min-height: 40px; }
+
+  /* --- listes : empty states gardent leurs marges --- */
+  .m-list .empty { padding: 1.75rem 1rem; }
+
+  /* --- formulaire repliable « Ajouter » pleine largeur --- */
+  details.m-add {
+    margin: 0 -0.9rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  details.m-add > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    cursor: pointer;
+    padding: 0.85rem 0.9rem;
+    font-weight: 700;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    min-height: 48px;
+  }
+  details.m-add > summary::-webkit-details-marker { display: none; }
+  details.m-add > summary::before {
+    content: "+";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  details.m-add[open] > summary::before { content: "–"; }
+  details.m-add .m-add-body { padding: 0 0.9rem 1rem; }
+
+  /* --- inputs ≥ 44px, 16px (évite le zoom iOS) --- */
+  input, select, textarea, button {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .m-add-body .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.7rem; }
+  .m-add-body .field input,
+  .m-add-body .field select { width: 100%; }
+  .m-add-body button[type="submit"] { width: 100%; margin-top: 0.3rem; }
+  /* boutons d'action compacts dans les listes : on garde la cible 44px */
+  .m-actions button { min-height: 40px; padding: 0.4rem 0.7rem; }
+
+  /* --- status : metric grid 2 colonnes (déjà 1fr/auto), graphe pleine largeur --- */
+  .chart-wrap { height: 240px; }
+
+  /* --- logout sur la page Statut (mobile only) --- */
+  .m-logout {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 -0.9rem;
+    padding: 0.9rem;
+    border-top: 1px solid var(--border);
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .m-logout .ico { width: 18px; height: 18px; }
+
+  /* tactile : pas d'états hover persistants */
+  tbody tr:hover { background: transparent; }
+  .m-row:hover { background: none; }
+  button.m-row.selected:hover { background: var(--accent-soft); }
+}
+
+/* afficher les blocs « mobile only », masquer les blocs desktop-only */
+@media (max-width: 720px) {
+  .m-only { display: block; }
+  .m-hide { display: none; }
 }

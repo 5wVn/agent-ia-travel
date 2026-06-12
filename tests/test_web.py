@@ -232,3 +232,48 @@ def test_dates_page_shows_best_price_with_stops(client):
     assert resp.status_code == 200
     assert "99" in resp.text
     assert "1 escale" in resp.text and "retour direct" in resp.text
+
+
+# ----- PWA : manifest, icônes, navigation mobile -------------------------
+
+
+def test_manifest_served_with_correct_content_type(client):
+    c, _ = client
+    # Public (pas d'auth requise) et content-type manifest correct.
+    resp = c.get("/manifest.webmanifest")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/manifest+json")
+    data = resp.json()
+    assert data["name"] == "Agent Travel"
+    assert data["display"] == "standalone"
+    # icônes 192 + 512 référencées
+    srcs = {i["src"] for i in data["icons"]}
+    assert "/static/icons/icon-192.png" in srcs
+    assert "/static/icons/icon-512.png" in srcs
+
+
+def test_pwa_icons_present_as_png(client):
+    c, _ = client
+    for path in (
+        "/static/icons/icon-192.png",
+        "/static/icons/icon-512.png",
+        "/static/icons/apple-touch-180.png",
+    ):
+        resp = c.get(path)
+        assert resp.status_code == 200, path
+        assert resp.headers["content-type"] == "image/png"
+        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"  # signature PNG
+
+
+def test_pages_carry_mobile_chrome_and_manifest(client):
+    c, _ = client
+    _login(c)
+    for path in ("/", "/routes", "/dates", "/status"):
+        resp = c.get(path)
+        assert resp.status_code == 200, path
+        # tab bar mobile + lien manifest présents dans le chrome de base
+        assert 'class="tabbar"' in resp.text, path
+        assert 'rel="manifest"' in resp.text, path
+        assert 'href="/manifest.webmanifest"' in resp.text, path
+    # déconnexion accessible depuis la page Statut sur mobile
+    assert 'class="m-logout' in c.get("/status").text
