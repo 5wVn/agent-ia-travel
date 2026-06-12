@@ -1,0 +1,42 @@
+{
+  "success": true,
+  "data": [
+    {
+      "origin": "TLS",
+      "destination": "ORY",
+      "origin_airport": "TLS",
+      "destination_airport": "ORY",
+      "price": 54,
+      "airline": "AF",
+      "flight_number": 6123,
+      "departure_at": "2026-09-12T17:35:00Z",
+      "return_at": "2026-09-14T19:10:00Z",
+      "transfers": 0,
+      "return_transfers": 0,
+      "duration": 150,
+      "duration_to": 75,
+      "duration_back": 80,
+      "link": "/search/TLS1209ORY1409?t=ABC123",
+      "currency": "eur"
+    },
+    {
+      "origin": "TLS",
+      "destination": "ORY",
+      "origin_airport": "TLS",
+      "destination_airport": "ORY",
+      "price": 89.5,
+      "airline": "U2",
+      "flight_number": 4421,
+      "departure_at": "2026-09-12T07:05:00Z",
+      "return_at": "2026-09-14T21:40:00Z",
+      "transfers": 0,
+      "return_transfers": 0,
+      "duration": 165,
+      "duration_to": 80,
+      "duration_back": 85,
+      "link": "/search/TLS1209ORY1409?t=DEF456",
+      "currency": "eur"
+    }
+  ],
+  "currency": "eur"
+}

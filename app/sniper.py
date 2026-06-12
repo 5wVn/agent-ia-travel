@@ -48,6 +48,8 @@ class SnipeResult:
     deep_link: Optional[str] = None
     # 'triggered' | 'rebounded' | 'watching' | 'no_data'
     status: str = "watching"
+    # Cache-age note for cached providers (e.g. Travelpayouts); None = real-time.
+    freshness_note: Optional[str] = None
 
 
 def snipe_candidates(config: Config, db: Database) -> list[Any]:
@@ -80,12 +82,14 @@ def reverify_price(
     client: Any,
     raw_offer: dict[str, Any],
 ) -> Optional[float]:
-    """Re-check a raw offer's live price via Flight Offers Price.
+    """Re-check a raw offer's live price (legacy ``price_offer`` path).
 
     Returns the confirmed total price in EUR, or None if the verification
     could not be performed (network/parse error) — the caller then treats the
     snipe as unconfirmed and keeps watching. ``client`` must expose
-    ``price_offer(raw_offer) -> payload`` (see :class:`AmadeusClient`).
+    ``price_offer(raw_offer) -> payload`` (see :class:`AmadeusClient`). New code
+    goes through ``provider.verify_price`` instead; this helper stays for the
+    Amadeus pricing endpoint and its unit tests.
     """
     try:
         payload = client.price_offer(raw_offer)
@@ -110,19 +114,49 @@ def extract_priced_total(payload: dict[str, Any]) -> Optional[float]:
         return None
 
 
+def _verify(config: Config, provider: Any, best: Any) -> tuple[
+    Optional[float], Optional[str], Optional[str]
+]:
+    """Re-verify the freshest price for an observation row.
+
+    Prefers the provider interface ``verify_price(observation) -> VerifiedPrice``
+    (Travelpayouts re-fetch with a freshness note + fresh deep link); falls back
+    to the legacy ``price_offer`` re-pricing (Amadeus) used by existing tests.
+
+    Returns ``(price, freshness_note, deep_link)``; ``price`` is None when the
+    check could not be performed.
+    """
+    if hasattr(provider, "verify_price"):
+        verified = provider.verify_price(best)
+        if verified is None:
+            return None, None, None
+        return verified.price_eur, getattr(verified, "freshness_note", None), getattr(
+            verified, "deep_link", None
+        )
+    # Legacy path: re-price the stored raw offer via price_offer.
+    raw_offer = _load_raw_offer(best["raw_offer"])
+    if raw_offer is None:
+        return None, None, None
+    return reverify_price(config, provider, raw_offer), None, None
+
+
 def evaluate_snipe(
     config: Config,
     db: Database,
     tracked_row: Any,
-    client: Any,
+    provider: Any,
 ) -> SnipeResult:
-    """Evaluate one armed snipe: detect trigger and re-verify the live price.
+    """Evaluate one armed snipe: detect trigger and re-verify the freshest price.
 
     Flow per PLAN.md step 4bis:
       - best observed price > threshold  -> still watching
-      - best observed price <= threshold -> re-verify live:
+      - best observed price <= threshold -> re-verify (live price for Amadeus,
+        freshest cached price for Travelpayouts):
           * confirmed <= threshold -> triggered (state set by caller path)
           * confirmed  > threshold -> rebounded ("raté, je continue à viser")
+
+    ``provider`` is a :class:`app.providers.FlightProvider` (uses
+    ``verify_price``); a legacy ``price_offer`` client is still accepted.
     """
     tracked_id = int(tracked_row["id"])
     threshold = float(tracked_row["snipe_price_eur"])
@@ -153,14 +187,12 @@ def evaluate_snipe(
             status="watching",
         )
 
-    # Candidate trigger: re-verify the live price before alerting.
-    raw_offer = _load_raw_offer(best["raw_offer"])
-    confirmed = (
-        reverify_price(config, client, raw_offer) if raw_offer is not None else None
-    )
+    # Candidate trigger: re-verify the freshest price before alerting.
+    confirmed, freshness, fresh_link = _verify(config, provider, best)
     # If we cannot re-verify, fall back to the observed best price so a genuine
     # drop is not silently dropped on a transient pricing error.
     effective = confirmed if confirmed is not None else best_price
+    deep_link = fresh_link or best["deep_link"]
 
     if effective <= threshold:
         return SnipeResult(
@@ -172,11 +204,12 @@ def evaluate_snipe(
             triggered=True,
             confirmed_price_eur=effective,
             observation_id=int(best["id"]),
-            deep_link=best["deep_link"],
+            deep_link=deep_link,
             status="triggered",
+            freshness_note=freshness,
         )
 
-    # Live price climbed back above the threshold before we could alert.
+    # Live/fresh price climbed back above the threshold before we could alert.
     return SnipeResult(
         tracked_id=tracked_id,
         depart_date=depart,
@@ -187,6 +220,7 @@ def evaluate_snipe(
         confirmed_price_eur=effective,
         observation_id=int(best["id"]),
         status="rebounded",
+        freshness_note=freshness,
     )
 
 

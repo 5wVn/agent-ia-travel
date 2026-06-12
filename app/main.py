@@ -22,12 +22,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .analyst import Analyst
 from .bot import TravelBot, format_deal_alert
 from .collector import (
-    AmadeusClient,
     build_snipe_queries,
     quota_allows,
     run_collection,
     standard_scan_should_defer,
 )
+from .providers import build_provider
 from .config import Config, load_config
 from .db import Database
 from .scoring import score_and_detect
@@ -190,18 +190,18 @@ class App:
                     run_collection, self.config, self.db, None, queries
                 )
 
-            client = await asyncio.to_thread(AmadeusClient, self.config)
+            provider = await asyncio.to_thread(build_provider, self.config)
             try:
                 for row in candidates:
                     tr = self.db.get_tracked_date(int(row["id"]))
                     if tr is None or tr["snipe_state"] != "armed":
                         continue  # disarmed/triggered meanwhile
                     result = await asyncio.to_thread(
-                        evaluate_snipe, self.config, self.db, tr, client
+                        evaluate_snipe, self.config, self.db, tr, provider
                     )
                     await self._handle_snipe_result(result)
             finally:
-                await asyncio.to_thread(client.close)
+                await asyncio.to_thread(provider.close)
         except Exception as exc:  # noqa: BLE001 — never crash the scheduler
             logger.error("Snipe tick échoué : %s", exc)
 
@@ -218,6 +218,9 @@ class App:
                 f"💶 {price:.0f} € (seuil ≤ {result.threshold_eur:.0f} €) — prix "
                 "confirmé en direct.\nValide vite avant qu'il ne remonte."
             )
+            if result.freshness_note:
+                # Cached provider (Travelpayouts): warn the price may have moved.
+                text += f"\n⚠️ {result.freshness_note}"
             await self.bot.send_triggered_alert(text, result.tracked_id)
             self._schedule_repings(result.tracked_id)
         elif result.status == "rebounded":

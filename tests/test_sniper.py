@@ -152,6 +152,48 @@ def test_evaluate_falls_back_to_observed_on_pricing_error(config, db):
     assert res.status == "triggered"
 
 
+class _FakeProvider:
+    """Provider-style stand-in exposing verify_price (Travelpayouts path)."""
+
+    def __init__(self, price, note="prix observé il y a ~2 h, vérifie au clic"):
+        self.price = price
+        self.note = note
+
+    def verify_price(self, observation):
+        from app.providers import VerifiedPrice
+
+        if self.price is None:
+            return None
+        return VerifiedPrice(
+            price_eur=self.price,
+            deep_link="https://www.aviasales.com/search/X?marker=1",
+            freshness_note=self.note,
+        )
+
+
+def test_evaluate_uses_provider_verify_price_with_freshness(config, db):
+    tid = db.insert_tracked_date(depart_date="2026-09-12", return_date="2026-09-14")
+    db.arm_snipe(tid, 55.0)
+    _insert_best(db, 50.0)
+    tr = db.get_tracked_date(tid)
+    res = evaluate_snipe(config, db, tr, _FakeProvider(price=52.0))
+    assert res.triggered is True
+    assert res.status == "triggered"
+    assert res.confirmed_price_eur == 52.0
+    assert res.freshness_note == "prix observé il y a ~2 h, vérifie au clic"
+    assert res.deep_link.startswith("https://www.aviasales.com/")
+
+
+def test_evaluate_provider_verify_none_falls_back_to_observed(config, db):
+    tid = db.insert_tracked_date(depart_date="2026-09-12", return_date="2026-09-14")
+    db.arm_snipe(tid, 55.0)
+    _insert_best(db, 50.0)
+    tr = db.get_tracked_date(tid)
+    # verify_price returns None (provider re-check failed) -> use observed 50.
+    res = evaluate_snipe(config, db, tr, _FakeProvider(price=None))
+    assert res.triggered is True
+
+
 def test_evaluate_no_data(config, db):
     tid = db.insert_tracked_date(depart_date="2026-09-12", return_date="2026-09-14")
     db.arm_snipe(tid, 55.0)
@@ -184,7 +226,7 @@ def test_extract_priced_total_falls_back_to_total():
 
 
 def test_standard_scan_defers_when_quota_tight_and_snipe_close(config, db):
-    config.amadeus_monthly_quota = 10
+    config.travelpayouts_monthly_quota = 10  # fixture provider is travelpayouts
     config.quota_safety_ratio = 0.80  # ceiling = 8
     # routes = 2, one candidate -> reserve = 2.
     for _ in range(7):  # used = 7; 7 + 2 >= 8 -> defer
@@ -193,7 +235,7 @@ def test_standard_scan_defers_when_quota_tight_and_snipe_close(config, db):
 
 
 def test_standard_scan_does_not_defer_without_snipes(config, db):
-    config.amadeus_monthly_quota = 10
+    config.travelpayouts_monthly_quota = 10
     config.quota_safety_ratio = 0.80
     for _ in range(7):
         db.record_api_call()
@@ -201,7 +243,7 @@ def test_standard_scan_does_not_defer_without_snipes(config, db):
 
 
 def test_standard_scan_does_not_defer_when_quota_ample(config, db):
-    config.amadeus_monthly_quota = 2000
+    config.travelpayouts_monthly_quota = 2000
     config.quota_safety_ratio = 0.80
     db.record_api_call()
     assert standard_scan_should_defer(config, db, snipe_candidate_count=1) is False

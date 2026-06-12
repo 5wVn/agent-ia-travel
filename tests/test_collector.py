@@ -85,7 +85,7 @@ def test_build_queries_includes_tracked_dates(config, db):
 
 
 def test_quota_allows_stops_at_ceiling(config, db):
-    config.amadeus_monthly_quota = 10
+    config.travelpayouts_monthly_quota = 10  # fixture provider is travelpayouts
     config.quota_safety_ratio = 0.80  # ceiling = 8
     for _ in range(7):
         db.record_api_call()

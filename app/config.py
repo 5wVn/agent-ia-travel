@@ -62,13 +62,22 @@ DEFAULT_ROUTES: list[Route] = [
 class Config:
     """Runtime configuration. Built once at startup via :func:`load_config`."""
 
-    # Secrets (no defaults — must be provided via env).
-    amadeus_client_id: str
-    amadeus_client_secret: str
+    # Secrets.
     telegram_bot_token: str
     telegram_chat_id: str
+    # Amadeus keys are now optional: required only when FLIGHT_PROVIDER=amadeus
+    # (validated in load_config). They default to "" so tests/configs that use
+    # Travelpayouts need not provide them.
+    amadeus_client_id: str = ""
+    amadeus_client_secret: str = ""
     # Optional: when empty/None, the LLM is disabled and templates are used.
     anthropic_api_key: Optional[str] = None
+
+    # Flight-data provider selection. 'travelpayouts' (default) or 'amadeus'.
+    # ⚠️ Amadeus Self-Service is decommissioned on 2026-07-17.
+    flight_provider: str = "travelpayouts"
+    travelpayouts_token: Optional[str] = None
+    travelpayouts_marker: Optional[str] = None
 
     # Data.
     db_path: str = "/data/prices.db"
@@ -80,6 +89,9 @@ class Config:
     # Collection cadence (hours) and quota management.
     collect_interval_hours: int = 4
     amadeus_monthly_quota: int = 2000
+    # Travelpayouts/Aviasales Data API: generous free tier; the guard is mostly
+    # a courtesy rate-limit. Default chosen well above the weekend-scan needs.
+    travelpayouts_monthly_quota: int = 10000
     quota_safety_ratio: float = 0.80  # reduce frequency above 80% of monthly quota
 
     # Detection thresholds.
@@ -118,6 +130,12 @@ class Config:
     snipe_amount_step_eur: int = 5             # threshold grid step
     snipe_grid_page_size: int = 18             # amounts shown per page
 
+    def provider_monthly_quota(self) -> int:
+        """Monthly API-call quota for the active provider (generic guard)."""
+        if (self.flight_provider or "").strip().lower() == "amadeus":
+            return self.amadeus_monthly_quota
+        return self.travelpayouts_monthly_quota
+
     def deal_price_bucket_eur(self) -> int:
         """Price bucket width (euros) used in deal_key dedup."""
         return 10
@@ -134,11 +152,8 @@ def load_config() -> Config:
         RuntimeError: if a required secret is missing.
     """
     # ANTHROPIC_API_KEY is intentionally optional: without it the agent runs in
-    # "mode sans LLM" (template messages). Only the truly required secrets are
-    # validated here.
+    # "mode sans LLM" (template messages). Telegram secrets are always required.
     required = {
-        "AMADEUS_CLIENT_ID": os.environ.get("AMADEUS_CLIENT_ID"),
-        "AMADEUS_CLIENT_SECRET": os.environ.get("AMADEUS_CLIENT_SECRET"),
         "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
         "TELEGRAM_CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID"),
     }
@@ -148,6 +163,31 @@ def load_config() -> Config:
             "Variables d'environnement manquantes : " + ", ".join(missing)
         )
 
+    provider = (os.environ.get("FLIGHT_PROVIDER") or "travelpayouts").strip().lower()
+    if provider not in ("travelpayouts", "amadeus"):
+        raise RuntimeError(
+            f"FLIGHT_PROVIDER invalide : '{provider}'. "
+            "Valeurs acceptées : 'travelpayouts' (défaut) ou 'amadeus'."
+        )
+
+    amadeus_id = os.environ.get("AMADEUS_CLIENT_ID") or ""
+    amadeus_secret = os.environ.get("AMADEUS_CLIENT_SECRET") or ""
+    tp_token = os.environ.get("TRAVELPAYOUTS_TOKEN") or None
+    tp_marker = os.environ.get("TRAVELPAYOUTS_MARKER") or None
+
+    # Provider-specific credential checks: fail fast with a clear message.
+    if provider == "amadeus" and not (amadeus_id and amadeus_secret):
+        raise RuntimeError(
+            "FLIGHT_PROVIDER=amadeus exige AMADEUS_CLIENT_ID et "
+            "AMADEUS_CLIENT_SECRET (le portail Self-Service ferme le 17/07/2026)."
+        )
+    if provider == "travelpayouts" and not tp_token:
+        raise RuntimeError(
+            "FLIGHT_PROVIDER=travelpayouts exige TRAVELPAYOUTS_TOKEN "
+            "(inscription gratuite sur travelpayouts.com, token dans l'espace "
+            "affilié)."
+        )
+
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if anthropic_key is not None and not anthropic_key.strip():
         anthropic_key = None
@@ -155,9 +195,12 @@ def load_config() -> Config:
     routes = _parse_routes(os.environ.get("ROUTES"))
 
     return Config(
-        amadeus_client_id=required["AMADEUS_CLIENT_ID"],  # type: ignore[arg-type]
-        amadeus_client_secret=required["AMADEUS_CLIENT_SECRET"],  # type: ignore[arg-type]
+        amadeus_client_id=amadeus_id,
+        amadeus_client_secret=amadeus_secret,
         anthropic_api_key=anthropic_key,
+        flight_provider=provider,
+        travelpayouts_token=tp_token,
+        travelpayouts_marker=tp_marker,
         telegram_bot_token=required["TELEGRAM_BOT_TOKEN"],  # type: ignore[arg-type]
         telegram_chat_id=required["TELEGRAM_CHAT_ID"],  # type: ignore[arg-type]
         db_path=os.environ.get("DB_PATH", "/data/prices.db"),
@@ -165,6 +208,7 @@ def load_config() -> Config:
         weekend_count=_get_int("WEEKEND_COUNT", 8),
         collect_interval_hours=_get_int("COLLECT_INTERVAL_HOURS", 4),
         amadeus_monthly_quota=_get_int("AMADEUS_MONTHLY_QUOTA", 2000),
+        travelpayouts_monthly_quota=_get_int("TRAVELPAYOUTS_MONTHLY_QUOTA", 10000),
         quota_safety_ratio=_get_float("QUOTA_SAFETY_RATIO", 0.80),
         absolute_price_threshold_eur=_get_float("ABSOLUTE_PRICE_THRESHOLD_EUR", 60.0),
         score_alert_threshold=_get_float("SCORE_ALERT_THRESHOLD", 80.0),

@@ -418,9 +418,9 @@ class TravelBot:
             else:
                 route = f"{obs['origin']}-{obs['destination']}" if obs else "vol"
                 msg = (
-                    "✅ Décision enregistrée. Pas de lien direct via Amadeus "
-                    f"Self-Service — recherche {route} sur Google Flights / "
-                    "le site de la compagnie."
+                    "✅ Décision enregistrée. Pas de lien direct pour cette offre "
+                    f"— recherche {route} sur Aviasales / Google Flights / le "
+                    "site de la compagnie."
                 )
             await query.edit_message_text(msg)
         elif action == "wait":
@@ -638,9 +638,9 @@ class TravelBot:
                 )
                 price = f" à {float(best['price_eur']):.0f} €" if best else ""
                 msg = (
-                    f"🎯 C'est noté ! Pas de lien direct Amadeus Self-Service — "
-                    f"réserve {route}{price} sur Google Flights / le site de la "
-                    "compagnie. Snipe désarmé."
+                    f"🎯 C'est noté ! Pas de lien direct pour cette offre — "
+                    f"réserve {route}{price} sur Aviasales / Google Flights / le "
+                    "site de la compagnie. Snipe désarmé."
                 )
             await query.edit_message_text(msg)
         elif action == "keep":
