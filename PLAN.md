@@ -15,6 +15,7 @@
 | LLM | **`claude-opus-4-8`** (Anthropic API, SDK Python) — **optionnel** | Le cœur du système (collecte, scoring, détection, sniper) est 100 % algorithmique. Le LLM ne sert qu'à rédiger les recos et le digest en langage naturel ; sans clé (`ANTHROPIC_API_KEY` absente), l'agent bascule sur des messages template — toutes les fonctions marchent. Coût si activé : ~quelques centimes/mois (1–3 appels/jour). Option éco : `claude-haiku-4-5`. |
 | Déploiement | **Docker Compose**, 1 conteneur Python | Un seul service modulaire (collector + analyseur + bot) : moins de pièces mobiles sur un NAS. `restart: unless-stopped` + healthcheck = autonomie. |
 | Réservation | **Deep link** (pas d'achat automatisé) | Automatiser l'achat (carte bancaire, anti-bot, CGU compagnies) est fragile et risqué. L'agent envoie le lien de réservation pré-rempli après ta confirmation — c'est le bon niveau d'automatisation. |
+| Dashboard web | **FastAPI + pages server-rendered** (Jinja2 + htmx/Chart.js vendorisés), même conteneur, port **8080 LAN uniquement** | Choix des dates et destinations à la souris, historique de prix en graphiques. Servi dans le même process asyncio que le bot (partage la db et le verrou d'écriture). Protégé par mot de passe (`DASHBOARD_PASSWORD`). **Pas exposé sur internet** : accès distant via VPN/Tailscale du NAS. Zéro build front (pas de Node). |
 
 ---
 
@@ -75,7 +76,18 @@ CREATE TABLE price_observations (
 );
 CREATE INDEX idx_obs_route_date ON price_observations(origin, destination, depart_date, observed_at);
 
--- Dates suivies, ajoutées via le calendrier Telegram (/track)
+-- Routes surveillées : les destinations deviennent des données, gérées depuis le
+-- dashboard (TLS⇄ORY/CDG semées par défaut au premier démarrage)
+CREATE TABLE routes (
+    id          INTEGER PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    origin      TEXT NOT NULL,            -- code IATA, ex. 'TLS'
+    destination TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(origin, destination)
+);
+
+-- Dates suivies, ajoutées via le calendrier Telegram (/track) ou le dashboard
 CREATE TABLE tracked_dates (
     id               INTEGER PRIMARY KEY,
     created_at       TEXT NOT NULL,
@@ -264,7 +276,8 @@ agent-ia-travel/
 1. **Phase 1 — Boucle minimale** : collector Amadeus → SQLite → alerte Telegram sur seuil absolu. *Déjà utile sans LLM.*
 2. **Phase 2 — Intelligence** : médiane glissante, anti-spam, analyse + reco Claude, boutons de confirmation, table `decisions`.
 3. **Phase 3 — Confort** : digest quotidien, calendrier interactif `/track` (sélection des jours + fourchettes horaires), `/untrack`, `/status`, `/pause`, mémoire des préférences (heures de vol préférées, compagnies à éviter).
-4. **Phase 4 — Optionnel** : 2e source de prix (Travelpayouts) pour croiser, comparaison TGV (API SNCF) sur le même trajet, petit dashboard (Grafana/Streamlit) branché sur SQLite.
+4. **Phase 4 — Dashboard web** (LAN, port 8080) : gestion des **routes/destinations** (codes IATA, activation), gestion des **dates suivies** (date pickers + fourchettes horaires) et des **snipes**, **historique de prix en graphiques** (Chart.js, données de `price_observations`), vue statut (quota, dernière collecte, alertes récentes). Telegram et dashboard écrivent dans les mêmes tables — deux interfaces, une seule source of truth.
+5. **Phase 5 — Optionnel** : comparaison TGV (API SNCF) sur le même trajet, 3e provider temps réel (SerpAPI).
 
 ---
 
