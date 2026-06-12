@@ -50,7 +50,7 @@ La base SQLite est persistée dans `./data/prices.db` (monté en volume). Pour l
 ### Amadeus (Self-Service API)
 
 1. Créer un compte sur <https://developers.amadeus.com>.
-2. Dans **My Self-Service Workspace**, créer une application.
+2. Dans **My Self-Service Workspace**, créer une application — guide officiel : [Quick start](https://developers.amadeus.com/self-service/apis-docs/guides/developer-guides/quick-start/) et [obtenir ses clés API](https://developers.amadeus.com/self-service/apis-docs/guides/developer-guides/API-Keys/). (Les anciennes URL `developers.amadeus.com/get-started/...` ne fonctionnent plus.)
 3. Récupérer **API Key** (→ `AMADEUS_CLIENT_ID`) et **API Secret** (→ `AMADEUS_CLIENT_SECRET`).
 4. Le code cible l'environnement de test (`test.api.amadeus.com`). Le tier gratuit suffit largement ; ajustez `AMADEUS_MONTHLY_QUOTA` à votre quota réel — la fréquence de collecte se réduit automatiquement à 80 % du quota.
 
