@@ -9,7 +9,7 @@
 | Décision | Choix | Justification |
 |---|---|---|
 | Canal de notification | **Telegram** (pas Slack) | Bot API gratuite, *long polling* = uniquement du trafic **sortant** → aucun port à ouvrir sur le NAS, pas de reverse proxy, pas de webhook HTTPS à exposer. Boutons inline natifs pour la confirmation. |
-| Source de données vols | **Amadeus Self-Service API** (primaire) | Tier gratuit (~plusieurs centaines d'appels/mois), données GDS fiables, endpoint `flight-offers-search` couvre TLS-ORY/CDG. Fallback possible : Travelpayouts (gratuit, données cache + liens d'affiliation) ou SerpAPI Google Flights (payant, le plus exhaustif). |
+| Source de données vols | **Travelpayouts/Aviasales Data API** (primaire) | ⚠️ Amadeus décommissionne son portail Self-Service le **17/07/2026** (clés désactivées, inscriptions gelées avant). Travelpayouts : gratuit pour un particulier, prix en cache alimentés par les recherches réelles Aviasales, **deep links de réservation inclus**. Le collector est une abstraction *provider* : Amadeus reste utilisable jusqu'à l'arrêt, SerpAPI Google Flights (payant, temps réel) branchable en 3e provider. Limite assumée : données en cache (fraîcheur en heures) → la re-vérification sniper devient « cache le plus frais » avec âge du prix affiché dans l'alerte. |
 | Source of truth | **SQLite** (fichier sur volume NAS) | Une seule table append-only d'observations de prix. Zéro serveur DB à maintenir, backup = copie de fichier, largement suffisant pour quelques milliers de lignes/mois. Tout le reste (baseline, alertes, digests) est **dérivé** de cette table. |
 | Détection de deal | **Règles déterministes** (pas le LLM) | Comparer un prix à une médiane glissante est du SQL, pas de l'IA. Le LLM n'intervient que là où il a de la valeur : analyse, rédaction, recommandation, dialogue. → coût LLM quasi nul et comportement prévisible. |
 | LLM | **`claude-opus-4-8`** (Anthropic API, SDK Python) — **optionnel** | Le cœur du système (collecte, scoring, détection, sniper) est 100 % algorithmique. Le LLM ne sert qu'à rédiger les recos et le digest en langage naturel ; sans clé (`ANTHROPIC_API_KEY` absente), l'agent bascule sur des messages template — toutes les fonctions marchent. Coût si activé : ~quelques centimes/mois (1–3 appels/jour). Option éco : `claude-haiku-4-5`. |
@@ -272,7 +272,8 @@ agent-ia-travel/
 
 | Risque | Parade |
 |---|---|
-| Quota Amadeus dépassé | Compteur d'appels en base, réduction auto de la fréquence à 80 % du quota |
+| Quota API dépassé | Compteur d'appels en base, réduction auto de la fréquence à 80 % du quota |
+| Disparition d'une source (cf. Amadeus 17/07/2026) | Abstraction provider dans le collector : changer de source = une classe + une variable d'env, le reste du pipeline ne bouge pas |
 | API down / réseau NAS | Retry + backoff, l'agent saute le tick sans crasher, alerte Telegram si > 24h sans collecte |
 | Spam d'alertes | `deal_key` unique + cooldown par route |
 | Clé API qui fuit | `.env` hors git, permissions fichier, token Telegram régénérable en 10 s |
