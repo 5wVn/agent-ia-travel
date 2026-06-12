@@ -4,7 +4,7 @@
 <h1>Destinations</h1>
 {% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
-<div class="card">
+<div class="card" data-reveal>
   <div class="head"><h2>Ajouter une route</h2></div>
   <form method="post" action="/routes/add" class="formgrid">
     <div class="field">
@@ -21,7 +21,7 @@
   </form>
 </div>
 
-<div class="card">
+<div class="card" data-reveal>
   {% if routes %}
   <table class="stacked">
     <thead><tr><th>Route</th><th>État</th><th></th></tr></thead>

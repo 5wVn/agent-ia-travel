@@ -3,18 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1419" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
-  <title>{% block title %}Dashboard{% endblock %} · Agent IA Travel</title>
+  <meta name="theme-color" content="#0a0e14" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+  <title>{% block title %}Dashboard{% endblock %} · Agent Travel</title>
+  <link rel="preload" href="/static/fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/manrope.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/dashboard.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/chart.min.js" defer></script>
   <script src="/static/charts.js" defer></script>
+  <script src="/static/reveal.js" defer></script>
 </head>
 <body>
   {% block chrome %}
   <header class="topbar">
-    <span class="brand">✈️ Agent IA Travel</span>
+    <span class="brand"><span class="plane">✈️</span><span class="name">Agent <b>Travel</b></span></span>
     <nav class="tabs">
       <a href="/" class="{{ 'active' if active == 'overview' else '' }}">Vue d'ensemble</a>
       <a href="/routes" class="{{ 'active' if active == 'routes' else '' }}">Destinations</a>

@@ -7,12 +7,12 @@
 {% set pct = (pct if pct < 100 else 100) %}
 {% set level = "hi" if pct >= 85 else ("mid" if pct >= 60 else "lo") %}
 
-<div class="card">
+<div class="card" data-reveal>
   <div class="head"><h2>Quota mensuel</h2>
     <span class="badge accent">{{ quota.provider }}</span>
   </div>
   <div class="gauge">
-    <div class="track"><div class="fill {{ level }}" style="width: {{ pct|round(0)|int }}%"></div></div>
+    <div class="track"><div class="fill {{ level }}" data-target="{{ pct|round(0)|int }}" style="width: 0%"></div></div>
     <div class="legend">
       <span>{{ quota.used }} appels utilisés</span>
       <span>plafond {{ quota.ceiling }}</span>
@@ -32,7 +32,7 @@
 </div>
 
 <h2>Snipes armés</h2>
-<div class="card">
+<div class="card" data-reveal>
   {% if armed_snipes %}
   <table class="stacked">
     <thead><tr><th>Aller</th><th>Retour</th><th>Seuil</th><th>État</th></tr></thead>

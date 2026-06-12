@@ -4,7 +4,7 @@
 <h1>Vue d'ensemble</h1>
 
 {% if not routes %}
-  <div class="card">
+  <div class="card" data-reveal>
     <div class="empty">
       <span class="emoji">🗺️</span>
       <div class="title">Aucune route suivie</div>
@@ -16,7 +16,7 @@
 
 {% for r in routes %}
 {% set tag = {"good": "Bon deal", "neutral": "Dans la moyenne", "high": "Au-dessus médiane"} %}
-<div class="card route-card">
+<div class="card route-card" data-reveal>
   <div class="route-top">
     <div>
       <p class="route-name">{{ r.label }}</p>
@@ -67,7 +67,7 @@
 {% endfor %}
 
 <h2>Alertes récentes</h2>
-<div class="card">
+<div class="card" data-reveal>
   {% if alerts %}
   <table class="stacked">
     <thead><tr><th>Date</th><th>Route</th><th>Vol</th><th>Prix</th></tr></thead>

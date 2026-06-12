@@ -52,6 +52,11 @@
     };
   }
 
+  function prefersReducedMotion() {
+    return window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
   function num(v) {
     if (v === "" || v === null || v === undefined) return null;
     var n = parseFloat(v);
@@ -108,7 +113,9 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: 250 },
+        animation: prefersReducedMotion()
+          ? false
+          : { duration: 600, easing: "easeOutCubic" },
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: {

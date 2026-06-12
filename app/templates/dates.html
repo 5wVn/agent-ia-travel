@@ -4,7 +4,7 @@
 <h1>Dates suivies</h1>
 {% if error %}<div class="banner error autohide">{{ error }}</div>{% endif %}
 
-<div class="card">
+<div class="card" data-reveal>
   <div class="head"><h2>Ajouter une date</h2></div>
   <form method="post" action="/dates/add" class="formgrid">
     <div class="field">
@@ -51,7 +51,7 @@
 </div>
 
 {% if dates %}
-<div class="card">
+<div class="card" data-reveal>
   <table class="stacked">
     <thead>
       <tr><th>Aller</th><th>Retour</th><th>Fourchettes</th><th>Route</th><th>Meilleur prix</th><th>Snipe</th><th></th></tr>
@@ -104,7 +104,7 @@
   </table>
 </div>
 {% else %}
-<div class="card">
+<div class="card" data-reveal>
   <div class="empty">
     <span class="emoji">📅</span>
     <div class="title">Aucune date suivie</div>
