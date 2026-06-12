@@ -12,7 +12,7 @@
 | Source de données vols | **Amadeus Self-Service API** (primaire) | Tier gratuit (~plusieurs centaines d'appels/mois), données GDS fiables, endpoint `flight-offers-search` couvre TLS-ORY/CDG. Fallback possible : Travelpayouts (gratuit, données cache + liens d'affiliation) ou SerpAPI Google Flights (payant, le plus exhaustif). |
 | Source of truth | **SQLite** (fichier sur volume NAS) | Une seule table append-only d'observations de prix. Zéro serveur DB à maintenir, backup = copie de fichier, largement suffisant pour quelques milliers de lignes/mois. Tout le reste (baseline, alertes, digests) est **dérivé** de cette table. |
 | Détection de deal | **Règles déterministes** (pas le LLM) | Comparer un prix à une médiane glissante est du SQL, pas de l'IA. Le LLM n'intervient que là où il a de la valeur : analyse, rédaction, recommandation, dialogue. → coût LLM quasi nul et comportement prévisible. |
-| LLM | **`claude-opus-4-8`** (Anthropic API, SDK Python) | Modèle par défaut recommandé ($5/$25 par MTok). Volume minuscule (1–3 appels/jour, petits contextes) → coût de l'ordre de **quelques centimes/mois**. Option éco si tu veux : `claude-haiku-4-5` ($1/$5) — c'est ton arbitrage, pas une nécessité. |
+| LLM | **`claude-opus-4-8`** (Anthropic API, SDK Python) — **optionnel** | Le cœur du système (collecte, scoring, détection, sniper) est 100 % algorithmique. Le LLM ne sert qu'à rédiger les recos et le digest en langage naturel ; sans clé (`ANTHROPIC_API_KEY` absente), l'agent bascule sur des messages template — toutes les fonctions marchent. Coût si activé : ~quelques centimes/mois (1–3 appels/jour). Option éco : `claude-haiku-4-5`. |
 | Déploiement | **Docker Compose**, 1 conteneur Python | Un seul service modulaire (collector + analyseur + bot) : moins de pièces mobiles sur un NAS. `restart: unless-stopped` + healthcheck = autonomie. |
 | Réservation | **Deep link** (pas d'achat automatisé) | Automatiser l'achat (carte bancaire, anti-bot, CGU compagnies) est fragile et risqué. L'agent envoie le lien de réservation pré-rempli après ta confirmation — c'est le bon niveau d'automatisation. |
 
@@ -166,6 +166,15 @@ client.messages.create(
 - **✅ Réserver** → l'agent répond avec le deep link de réservation + enregistre la décision.
 - **⏳ Attendre** → surveillance renforcée de cette date ; re-alerte si le prix baisse encore ou remonte brutalement (signal "dernière chance").
 - **🔕 Ignorer** → blacklist de la date, plus d'alertes dessus.
+
+### Étape 4bis — Sniper de prix (seuils armés)
+
+Mode « achat au meilleur prix » sans automatiser le paiement (DSP2/3-D Secure exigerait de toute façon une validation bancaire ; l'émission de billets par API demande une accréditation agence). Le snipe ramène l'achat à **un tap** :
+
+1. **Armement** : `/snipe` → choix d'une date suivie (ou création via le calendrier) → saisie du seuil (ex. 55 €). Stocké sur `tracked_dates` (`snipe_price_eur`, `snipe_state`).
+2. **Surveillance boostée** : dès que le meilleur prix observé approche le seuil (< seuil × 1,15), la collecte passe à **toutes les 15 min pour cette date uniquement** (les dates snipées sont prioritaires dans le budget quota ; le scan week-ends s'efface si nécessaire).
+3. **Déclenchement** : prix ≤ seuil → l'agent **re-vérifie le prix en direct** (Amadeus Flight Offers Price, anti-prix-périmé) → si confirmé, **alerte critique** Telegram : message épinglé + re-ping toutes les 5 min (max 6) jusqu'à réponse, boutons `[🎯 J'achète]` (lien direct + log décision, snipe désarmé) / `[⏳ Continue à viser]` / `[🔕 Désarmer]`.
+4. **Filet de sécurité** : si le prix remonte au-dessus du seuil avant ta réponse, l'agent met à jour le message (« raté, je continue à viser ») et réarme.
 
 ### Étape 5 — Digest quotidien (8h)
 Un message Telegram : min/max/médiane par route, meilleures dates du moment, deals en attente. Rédigé par le LLM (1 appel/jour).
