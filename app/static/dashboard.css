@@ -486,9 +486,9 @@ button.ghost:hover { background: var(--surface-2); }
     position: sticky;
     top: 0;
     z-index: 30;
-    height: 48px;
+    min-height: 48px;
     padding: 0 1rem;
-    padding-top: env(safe-area-inset-top, 0);
+    padding-top: env(safe-area-inset-top, 0px);
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
@@ -539,14 +539,11 @@ button.ghost:hover { background: var(--surface-2); }
     margin-bottom: calc(64px + env(safe-area-inset-bottom, 0));
   }
 
-  /* sticky header de page */
+  /* titre de page : non sticky — une seule barre collante (mobile-head), pas de
+     double bandeau ni de raccord laissant passer le contenu au scroll */
   h1 {
-    position: sticky;
-    top: calc(48px + env(safe-area-inset-top, 0));
-    z-index: 10;
     margin: 0 -0.9rem 0.75rem;
     padding: 0.6rem 0.9rem;
-    background: var(--bg);
     border-bottom: 1px solid var(--border);
     font-size: 0.95rem;
   }
